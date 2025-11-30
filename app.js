@@ -752,10 +752,26 @@ function initializeApp() {
             .eq('goal_id', goalId)
             .order('date', { ascending: false });
         
-        // Get user info for entries - we'll use a simpler approach
+        // Get unique user IDs
+        const userIds = [...new Set((entries || []).map(e => e.user_id))];
+        
+        // Get user profiles
+        const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, name, email')
+            .in('id', userIds);
+        
+        // Create a map for quick lookup
+        const userMap = {};
+        if (profiles) {
+            profiles.forEach(p => {
+                userMap[p.id] = p.name || p.email || 'Unknown';
+            });
+        }
+        
+        // Get user info for entries
         const entriesWithUsers = (entries || []).map(entry => {
-            // For now, just use user_id - we'll enhance this later
-            return { ...entry, userName: 'User' };
+            return { ...entry, userName: userMap[entry.user_id] || 'Unknown' };
         });
         
         // Get comments for each entry
@@ -766,9 +782,23 @@ function initializeApp() {
                 .eq('progress_id', entry.id)
                 .order('created_at', { ascending: true });
             
+            // Get user IDs from comments
+            const commentUserIds = [...new Set((comments || []).map(c => c.user_id))];
+            const { data: commentProfiles } = await supabase
+                .from('profiles')
+                .select('id, name, email')
+                .in('id', commentUserIds);
+            
+            const commentUserMap = {};
+            if (commentProfiles) {
+                commentProfiles.forEach(p => {
+                    commentUserMap[p.id] = p.name || p.email || 'Unknown';
+                });
+            }
+            
             // Get user info for comments
             const commentsWithUsers = (comments || []).map(comment => {
-                return { ...comment, userName: 'User' };
+                return { ...comment, userName: commentUserMap[comment.user_id] || 'Unknown' };
             });
             
             return { ...entry, comments: commentsWithUsers };
@@ -947,9 +977,26 @@ function initializeApp() {
                 .order('date', { ascending: false })
                 .limit(20);
             
+            // Get unique user IDs
+            const userIds = [...new Set((entries || []).map(e => e.user_id))];
+            
+            // Get user profiles
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, name, email')
+                .in('id', userIds);
+            
+            // Create a map for quick lookup
+            const userMap = {};
+            if (profiles) {
+                profiles.forEach(p => {
+                    userMap[p.id] = p.name || p.email || 'Unknown';
+                });
+            }
+            
             // Get user info for entries
             const entriesWithUsers = (entries || []).map(entry => {
-                return { ...entry, userName: 'User' };
+                return { ...entry, userName: userMap[entry.user_id] || 'Unknown' };
             });
             
             displayProgress(entriesWithUsers);
