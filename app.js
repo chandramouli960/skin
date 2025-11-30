@@ -202,18 +202,33 @@ function initializeApp() {
                     throw error;
                 }
                 
-                // Success
-                showStatus('Account created successfully! You can now log in.', 'success');
-                
-                // Reset form
-                registerForm.reset();
-                
-                // Switch to login form
-                document.getElementById('registerForm').style.display = 'none';
-                document.getElementById('loginForm').style.display = 'block';
-                
-                // Pre-fill email in login form
-                document.getElementById('loginEmail').value = email;
+                // Check if email confirmation is required
+                if (data && data.user && !data.session) {
+                    // Email confirmation required
+                    showStatus('Account created! Please check your email to confirm your account.', 'success');
+                    
+                    // Reset form
+                    registerForm.reset();
+                    
+                    // Switch to login form
+                    document.getElementById('registerForm').style.display = 'none';
+                    document.getElementById('loginForm').style.display = 'block';
+                    
+                    // Pre-fill email in login form
+                    document.getElementById('loginEmail').value = email;
+                } else if (data && data.session) {
+                    // Auto-logged in (if email confirmation disabled)
+                    currentUser = data.user;
+                    showMainApp(data.user);
+                    showStatus('Account created and logged in successfully!', 'success');
+                } else {
+                    // Fallback
+                    showStatus('Account created successfully! You can now log in.', 'success');
+                    registerForm.reset();
+                    document.getElementById('registerForm').style.display = 'none';
+                    document.getElementById('loginForm').style.display = 'block';
+                    document.getElementById('loginEmail').value = email;
+                }
                 
             } catch (error) {
                 console.error('Registration error:', error);
@@ -282,8 +297,23 @@ function initializeApp() {
                     throw error;
                 }
                 
-                // Success - auth state change will handle showing main app
-                showStatus('Logged in successfully!', 'success');
+                // Check if we got a session
+                if (data && data.session) {
+                    // Success - show main app immediately
+                    currentUser = data.user;
+                    showMainApp(data.user);
+                    showStatus('Logged in successfully!', 'success');
+                } else {
+                    // Wait a moment for auth state to update
+                    setTimeout(async () => {
+                        const { data: { session } } = await supabase.auth.getSession();
+                        if (session) {
+                            currentUser = session.user;
+                            showMainApp(session.user);
+                            showStatus('Logged in successfully!', 'success');
+                        }
+                    }, 500);
+                }
                 
                 // Clear password field for security
                 passwordInput.value = '';
