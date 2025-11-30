@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Goal Tracker - Groups & Progress</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>">
+    <link rel="stylesheet" href="styles.css">
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-init.js"></script>
+</head>
+<body>
+    <!-- Login/Register Modal -->
+    <div id="authModal" class="auth-modal">
+        <div class="auth-container">
+            <h2>Welcome to Goal Tracker</h2>
+            <p class="auth-subtitle">Track goals, join groups, and achieve together!</p>
+            
+            <!-- Login Form -->
+            <div id="loginForm" class="auth-form">
+                <h3>Login</h3>
+                <form id="loginFormElement">
+                    <div class="form-group">
+                        <label for="loginEmail">Email</label>
+                        <input type="email" id="loginEmail" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword">Password</label>
+                        <input type="password" id="loginPassword" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </form>
+                <p class="auth-switch">Don't have an account? <a href="#" id="showRegister">Register</a></p>
+            </div>
+            
+            <!-- Register Form -->
+            <div id="registerForm" class="auth-form" style="display: none;">
+                <h3>Create Account</h3>
+                <form id="registerFormElement">
+                    <div class="form-group">
+                        <label for="registerName">Name</label>
+                        <input type="text" id="registerName" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerEmail">Email</label>
+                        <input type="email" id="registerEmail" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerPassword">Password</label>
+                        <input type="password" id="registerPassword" name="password" required minlength="6">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Register</button>
+                </form>
+                <p class="auth-switch">Already have an account? <a href="#" id="showLogin">Login</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App (hidden until logged in) -->
+    <div id="mainApp" style="display: none;">
+        <!-- Top Header -->
+        <header class="app-header">
+            <div class="header-top">
+                <h1>Goal Tracker</h1>
+                <div class="header-actions">
+                    <button id="createGroupBtn" class="btn-icon" title="Create Group">+</button>
+                    <button id="logoutBtn" class="btn-icon" title="Logout">👤</button>
+                </div>
+            </div>
+            <div class="user-info-header">
+                <span id="userName"></span>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="app-main">
+            <!-- Groups Tab -->
+            <div id="groupsTab" class="tab-content active">
+                <div class="section-header">
+                    <h2>My Groups</h2>
+                    <button id="joinGroupBtn" class="btn btn-secondary btn-small">Join Group</button>
+                </div>
+                <div id="groupsList" class="cards-list">
+                    <p class="loading">Loading groups...</p>
+                </div>
+            </div>
+
+            <!-- Goals Tab -->
+            <div id="goalsTab" class="tab-content">
+                <div class="section-header">
+                    <h2>My Goals</h2>
+                    <button id="createGoalBtn" class="btn btn-primary btn-small">+ New Goal</button>
+                </div>
+                <div id="goalsList" class="cards-list">
+                    <p class="loading">Loading goals...</p>
+                </div>
+            </div>
+
+            <!-- Progress Tab -->
+            <div id="progressTab" class="tab-content">
+                <div class="section-header">
+                    <h2>Recent Progress</h2>
+                </div>
+                <div id="progressList" class="cards-list">
+                    <p class="loading">Loading progress...</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Bottom Navigation (Mobile) -->
+        <nav class="bottom-nav">
+            <button class="nav-item active" data-tab="groupsTab">
+                <span class="nav-icon">👥</span>
+                <span class="nav-label">Groups</span>
+            </button>
+            <button class="nav-item" data-tab="goalsTab">
+                <span class="nav-icon">🎯</span>
+                <span class="nav-label">Goals</span>
+            </button>
+            <button class="nav-item" data-tab="progressTab">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">Progress</span>
+            </button>
+        </nav>
+
+        <!-- Status Message -->
+        <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <!-- Modals -->
+    
+    <!-- Create Group Modal -->
+    <div id="createGroupModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Group</h3>
+                <button class="modal-close" data-modal="createGroupModal">&times;</button>
+            </div>
+            <form id="createGroupForm">
+                <div class="form-group">
+                    <label for="groupName">Group Name</label>
+                    <input type="text" id="groupName" required>
+                </div>
+                <div class="form-group">
+                    <label for="groupDescription">Description</label>
+                    <textarea id="groupDescription" rows="3"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Group</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Join Group Modal -->
+    <div id="joinGroupModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Join Group</h3>
+                <button class="modal-close" data-modal="joinGroupModal">&times;</button>
+            </div>
+            <form id="joinGroupForm">
+                <div class="form-group">
+                    <label for="groupCode">Group Code</label>
+                    <input type="text" id="groupCode" placeholder="Enter group code" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Join Group</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Goal Modal -->
+    <div id="createGoalModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Goal</h3>
+                <button class="modal-close" data-modal="createGoalModal">&times;</button>
+            </div>
+            <form id="createGoalForm">
+                <div class="form-group">
+                    <label for="goalTitle">Goal Title</label>
+                    <input type="text" id="goalTitle" placeholder="e.g., Daily Skincare" required>
+                </div>
+                <div class="form-group">
+                    <label for="goalDescription">Description</label>
+                    <textarea id="goalDescription" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="goalGroup">Group (Optional)</label>
+                    <select id="goalGroup">
+                        <option value="">Personal Goal</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="goalFrequency">Frequency</label>
+                    <select id="goalFrequency" required>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="goalTargetDays">Target Days</label>
+                    <input type="number" id="goalTargetDays" min="1" value="30">
+                </div>
+                <button type="submit" class="btn btn-primary">Create Goal</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Log Progress Modal -->
+    <div id="logProgressModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Log Progress</h3>
+                <button class="modal-close" data-modal="logProgressModal">&times;</button>
+            </div>
+            <form id="logProgressForm">
+                <input type="hidden" id="progressGoalId">
+                <div class="form-group">
+                    <label for="progressDate">Date</label>
+                    <input type="date" id="progressDate" required>
+                </div>
+                <div class="form-group">
+                    <label for="progressNotes">Notes (Optional)</label>
+                    <textarea id="progressNotes" rows="3"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Log Progress</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- View Goal Details Modal -->
+    <div id="goalDetailsModal" class="modal modal-large">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="goalDetailsTitle"></h3>
+                <button class="modal-close" data-modal="goalDetailsModal">&times;</button>
+            </div>
+            <div id="goalDetailsContent">
+                <!-- Goal info, progress entries, comments will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
