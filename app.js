@@ -66,12 +66,28 @@ function initializeApp() {
         if (modal) {
             modal.classList.remove('active');
             document.body.style.overflow = ''; // Restore scroll
+            
+            // Reset any forms in the modal
+            const forms = modal.querySelectorAll('form');
+            forms.forEach(form => {
+                form.reset();
+                // Clear edit mode if exists
+                if (form.dataset.editMode) {
+                    form.dataset.editMode = 'false';
+                    delete form.dataset.editGoalId;
+                    const submitBtn = form.querySelector('button[type="submit"]');
+                    if (submitBtn) {
+                        submitBtn.textContent = submitBtn.textContent.replace('Update', 'Create').replace('Updating', 'Create');
+                    }
+                }
+            });
         }
     }
 
     // Close modals when clicking outside, close button, or Escape key
     document.addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal')) {
+        // Only close if clicking directly on modal background, not on modal-content
+        if (e.target.classList.contains('modal') && !e.target.closest('.modal-content')) {
             closeModal(e.target.id);
         }
         if (e.target.classList.contains('modal-close')) {
@@ -90,28 +106,43 @@ function initializeApp() {
         }
     });
 
-    // Tab navigation
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const tabId = item.getAttribute('data-tab');
+    // Tab navigation - prevent duplicate listeners
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+        // Remove existing listener if any, then add new one
+        const newItem = item.cloneNode(true);
+        item.parentNode.replaceChild(newItem, item);
+        newItem.addEventListener('click', (e) => {
+            e.preventDefault();
+            const tabId = newItem.getAttribute('data-tab');
             switchTab(tabId);
         });
     });
 
     function switchTab(tabId) {
+        if (!tabId) return; // Safety check
+        
         // Hide all tabs
         document.querySelectorAll('.tab-content').forEach(tab => {
             tab.classList.remove('active');
         });
         
         // Show selected tab
-        document.getElementById(tabId).classList.add('active');
+        const targetTab = document.getElementById(tabId);
+        if (!targetTab) {
+            console.error(`Tab with id "${tabId}" not found`);
+            return;
+        }
+        targetTab.classList.add('active');
         
         // Update nav items
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.remove('active');
         });
-        document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+        const navItem = document.querySelector(`[data-tab="${tabId}"]`);
+        if (navItem) {
+            navItem.classList.add('active');
+        }
         
         // Load data for the tab
         if (tabId === 'groupsTab') {
@@ -503,9 +534,13 @@ function initializeApp() {
         }).join('');
     }
 
-    // Create group with unique code generation
+    // Create group with unique code generation - prevent double-clicks
+    let isOpeningGroupModal = false;
     document.getElementById('createGroupBtn')?.addEventListener('click', () => {
+        if (isOpeningGroupModal) return;
+        isOpeningGroupModal = true;
         openModal('createGroupModal');
+        setTimeout(() => { isOpeningGroupModal = false; }, 300);
     });
 
     document.getElementById('createGroupForm')?.addEventListener('submit', async (e) => {
@@ -590,9 +625,13 @@ function initializeApp() {
         }
     });
 
-    // Join group
+    // Join group - prevent double-clicks
+    let isOpeningJoinModal = false;
     document.getElementById('joinGroupBtn')?.addEventListener('click', () => {
+        if (isOpeningJoinModal) return;
+        isOpeningJoinModal = true;
         openModal('joinGroupModal');
+        setTimeout(() => { isOpeningJoinModal = false; }, 300);
     });
 
     document.getElementById('joinGroupForm')?.addEventListener('submit', async (e) => {
@@ -835,14 +874,36 @@ function initializeApp() {
         }
     }
 
-    // Create goal
+    // Create goal - prevent double-clicks
+    let isCreatingGoal = false;
     document.getElementById('createGoalBtn')?.addEventListener('click', () => {
+        if (isCreatingGoal) return; // Prevent double-clicks
+        isCreatingGoal = true;
+        
+        const form = document.getElementById('createGoalForm');
+        const submitBtn = form.querySelector('button[type="submit"]');
+        
+        // Reset form and clear edit mode
+        form.reset();
+        form.dataset.editMode = 'false';
+        delete form.dataset.editGoalId;
+        submitBtn.textContent = 'Create Goal';
+        
         updateGoalGroupDropdown();
         openModal('createGoalModal');
+        
+        setTimeout(() => { isCreatingGoal = false; }, 300);
     });
 
     document.getElementById('createGoalForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        const form = e.target;
+        
+        // If in edit mode, let the update handler take over
+        if (form.dataset.editMode === 'true') {
+            return; // Don't create, let update handler process it
+        }
         
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -974,6 +1035,8 @@ function initializeApp() {
                 this.reset();
                 this.dataset.editMode = 'false';
                 delete this.dataset.editGoalId;
+                const submitBtnAfter = this.querySelector('button[type="submit"]');
+                submitBtnAfter.textContent = 'Create Goal';
                 clearCache();
                 loadGoals(true);
             } catch (error) {
@@ -1192,8 +1255,16 @@ function initializeApp() {
         openModal('logProgressModal');
     };
     
+    // Prevent duplicate comment submissions
+    const commentSubmitting = new Set();
     window.addComment = async (progressId) => {
+        if (commentSubmitting.has(progressId)) {
+            return; // Already submitting
+        }
+        
         const input = document.getElementById(`comment-${progressId}`);
+        if (!input) return;
+        
         const content = input.value.trim();
         if (!content) {
             showStatus('Please enter a comment', 'error');
@@ -1204,6 +1275,9 @@ function initializeApp() {
         if (!user) return;
         
         const submitBtn = input.nextElementSibling;
+        if (!submitBtn) return;
+        
+        commentSubmitting.add(progressId);
         const originalText = submitBtn.textContent;
         submitBtn.disabled = true;
         submitBtn.textContent = 'Posting...';
@@ -1232,6 +1306,7 @@ function initializeApp() {
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = originalText;
+            commentSubmitting.delete(progressId);
         }
     };
 
