@@ -144,66 +144,163 @@ function initializeApp() {
     });
 
     // Handle registration
-    document.getElementById('registerFormElement')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const name = document.getElementById('registerName').value;
-        const email = document.getElementById('registerEmail').value;
-        const password = document.getElementById('registerPassword').value;
-        
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Creating...';
-        
-        try {
-            const { data, error } = await supabase.auth.signUp({
-                email: email,
-                password: password,
-                options: {
-                    data: {
-                        name: name
+    const registerForm = document.getElementById('registerFormElement');
+    if (registerForm) {
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const nameInput = document.getElementById('registerName');
+            const emailInput = document.getElementById('registerEmail');
+            const passwordInput = document.getElementById('registerPassword');
+            
+            if (!nameInput || !emailInput || !passwordInput) {
+                showStatus('Form fields not found', 'error');
+                return;
+            }
+            
+            const name = nameInput.value.trim();
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+            
+            // Validation
+            if (!name) {
+                showStatus('Please enter your name', 'error');
+                return;
+            }
+            
+            if (!email) {
+                showStatus('Please enter your email', 'error');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showStatus('Password must be at least 6 characters', 'error');
+                return;
+            }
+            
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            if (!submitBtn) {
+                showStatus('Submit button not found', 'error');
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating...';
+            
+            try {
+                const { data, error } = await supabase.auth.signUp({
+                    email: email,
+                    password: password,
+                    options: {
+                        data: {
+                            name: name
+                        }
                     }
+                });
+                
+                if (error) {
+                    throw error;
                 }
-            });
-            
-            if (error) throw error;
-            
-            showStatus('Account created successfully!', 'success');
-        } catch (error) {
-            console.error('Registration error:', error);
-            showStatus(getErrorMessage(error.message), 'error');
-            submitBtn.disabled = false;
-        submitBtn.textContent = 'Register';
-        }
-    });
+                
+                // Success
+                showStatus('Account created successfully! You can now log in.', 'success');
+                
+                // Reset form
+                registerForm.reset();
+                
+                // Switch to login form
+                document.getElementById('registerForm').style.display = 'none';
+                document.getElementById('loginForm').style.display = 'block';
+                
+                // Pre-fill email in login form
+                document.getElementById('loginEmail').value = email;
+                
+            } catch (error) {
+                console.error('Registration error:', error);
+                showStatus(getErrorMessage(error.message), 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Register';
+            }
+        });
+    }
 
     // Handle login
-    document.getElementById('loginFormElement')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const email = document.getElementById('loginEmail').value;
-        const password = document.getElementById('loginPassword').value;
-        
-        const submitBtn = e.target.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Logging in...';
-        
-        try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email: email,
-                password: password
-            });
+    const loginForm = document.getElementById('loginFormElement');
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
             
-            if (error) throw error;
+            const emailInput = document.getElementById('loginEmail');
+            const passwordInput = document.getElementById('loginPassword');
             
-            showStatus('Logged in successfully!', 'success');
-        } catch (error) {
-            console.error('Login error:', error);
-            showStatus(getErrorMessage(error.message), 'error');
-            submitBtn.disabled = false;
-        submitBtn.textContent = 'Login';
-        }
-    });
+            if (!emailInput || !passwordInput) {
+                showStatus('Form fields not found', 'error');
+                return;
+            }
+            
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+            
+            // Validation
+            if (!email) {
+                showStatus('Please enter your email', 'error');
+                emailInput.focus();
+                return;
+            }
+            
+            if (!password) {
+                showStatus('Please enter your password', 'error');
+                passwordInput.focus();
+                return;
+            }
+            
+            // Basic email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                showStatus('Please enter a valid email address', 'error');
+                emailInput.focus();
+                return;
+            }
+            
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            if (!submitBtn) {
+                showStatus('Submit button not found', 'error');
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Logging in...';
+            
+            try {
+                const { data, error } = await supabase.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Success - auth state change will handle showing main app
+                showStatus('Logged in successfully!', 'success');
+                
+                // Clear password field for security
+                passwordInput.value = '';
+                
+            } catch (error) {
+                console.error('Login error:', error);
+                showStatus(getErrorMessage(error.message), 'error');
+                
+                // Clear password on error
+                passwordInput.value = '';
+                passwordInput.focus();
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Login';
+            }
+        });
+    }
 
     // Handle logout
     document.getElementById('logoutBtn')?.addEventListener('click', async () => {
@@ -219,21 +316,43 @@ function initializeApp() {
 
     // Get user-friendly error messages
     function getErrorMessage(errorMessage) {
+        if (!errorMessage) return 'An error occurred. Please try again.';
+        
         const errorMessages = {
+            // Registration errors
             'User already registered': 'This email is already registered',
+            'already registered': 'This email is already registered',
             'Invalid email': 'Invalid email address',
-            'Password should be at least 6 characters': 'Password should be at least 6 characters',
+            'invalid email': 'Invalid email address',
+            'Password should be at least 6 characters': 'Password must be at least 6 characters',
+            'password': 'Password must be at least 6 characters',
+            'Email not confirmed': 'Please check your email to confirm your account',
+            'email not confirmed': 'Please check your email to confirm your account',
+            'signup_disabled': 'Registration is currently disabled',
+            'email_rate_limit': 'Too many requests. Please try again later',
+            
+            // Login errors
             'Invalid login credentials': 'Incorrect email or password',
-            'Email not confirmed': 'Please check your email to confirm your account'
+            'Invalid credentials': 'Incorrect email or password',
+            'invalid login': 'Incorrect email or password',
+            'invalid password': 'Incorrect password',
+            'Email not confirmed': 'Please check your email to confirm your account before logging in',
+            'User not found': 'No account found with this email',
+            'user not found': 'No account found with this email',
+            'too many requests': 'Too many login attempts. Please try again later',
+            'rate limit': 'Too many requests. Please wait a moment and try again',
+            'network': 'Network error. Please check your connection',
+            'Network request failed': 'Network error. Please check your connection'
         };
         
+        const lowerMessage = errorMessage.toLowerCase();
         for (const [key, value] of Object.entries(errorMessages)) {
-            if (errorMessage.includes(key) || errorMessage.toLowerCase().includes(key.toLowerCase())) {
+            if (lowerMessage.includes(key.toLowerCase())) {
                 return value;
             }
         }
         
-        return errorMessage || 'An error occurred. Please try again.';
+        return errorMessage;
     }
 
     // ========== GROUPS ==========
