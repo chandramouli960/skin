@@ -263,11 +263,19 @@ body {
 .btn-small {
     padding: 8px 16px;
     font-size: 0.9rem;
+    min-height: 44px; /* Better touch target */
+    min-width: 44px;
 }
 
 .btn-danger {
     background: var(--error);
     color: white;
+}
+
+.btn-danger:hover {
+    background: #d32f2f;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
 }
 
 /* Form Elements */
@@ -335,6 +343,9 @@ body {
     padding: 8px 20px;
     transition: color 0.2s;
     font-family: inherit;
+    min-height: 60px; /* Better touch target for mobile */
+    min-width: 60px;
+    touch-action: manipulation; /* Prevent double-tap zoom */
 }
 
 .nav-item.active {
@@ -427,6 +438,11 @@ body {
     background: var(--secondary);
 }
 
+.modal-close {
+    min-width: 44px; /* Better touch target */
+    min-height: 44px;
+}
+
 .modal-content form {
     padding: 20px;
 }
@@ -515,6 +531,8 @@ body {
 
 .add-comment button {
     padding: 10px 20px;
+    min-height: 44px; /* Better touch target */
+    min-width: 60px;
 }
 
 /* Status Message */
@@ -587,6 +605,19 @@ body {
     color: var(--text-light);
 }
 
+/* Better mobile scrolling */
+.modal-content {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent text selection on buttons for better mobile UX */
+.btn, .btn-icon, .nav-item {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
 /* Responsive - Desktop */
 @media (min-width: 768px) {
     .app-main {
@@ -613,6 +644,11 @@ body {
     
     .modal-large {
         max-width: 900px;
+    }
+    
+    .nav-item {
+        min-height: auto;
+        min-width: auto;
     }
 }
 
