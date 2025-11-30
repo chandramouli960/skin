@@ -8,7 +8,20 @@
     <link rel="stylesheet" href="styles.css">
     <!-- Supabase SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="supabase-init.js"></script>
+    <script>
+        // Wait for Supabase to load, then initialize
+        window.addEventListener('load', function() {
+            const SUPABASE_URL = 'https://gjuqohgorthzgcitjrqh.supabase.co';
+            const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqdXFvaGdvcnRoemdjaXRqcnFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MTkzNjAsImV4cCI6MjA4MDA5NTM2MH0.iEQOiTn-T3uClSYkoV5EvNXaEkMbYwBhbzGiGxCPB1o';
+            
+            // Initialize Supabase client
+            if (typeof supabase !== 'undefined') {
+                window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            } else {
+                console.error('Supabase library not loaded');
+            }
+        });
+    </script>
 </head>
 <body>
     <!-- Login/Register Modal -->
