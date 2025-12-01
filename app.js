@@ -2965,7 +2965,7 @@ function initializeApp() {
                 return;
             }
             
-            // Check if request already exists
+            // Check if request already exists (in either direction)
             const { data: existingRequests } = await supabase
                 .from('friend_requests')
                 .select('*')
@@ -2973,6 +2973,54 @@ function initializeApp() {
                 .eq('status', 'pending');
             
             if (existingRequests && existingRequests.length > 0) {
+                // If there is a pending request FROM the other user TO the current user,
+                // automatically accept it instead of blocking with an error.
+                const incomingRequest = existingRequests.find(r => 
+                    r.sender_id === profile.id && r.receiver_id === user.id && r.status === 'pending'
+                );
+
+                if (incomingRequest) {
+                    // Accept the existing incoming request
+                    const { error: updateError } = await supabase
+                        .from('friend_requests')
+                        .update({ status: 'accepted' })
+                        .eq('id', incomingRequest.id);
+                    
+                    if (updateError) {
+                        console.error('Error accepting existing friend request:', updateError);
+                        showStatus('Could not accept existing friend request. Please try again.', 'error');
+                        return;
+                    }
+
+                    // Create friendship
+                    const user1Id = incomingRequest.sender_id < incomingRequest.receiver_id ? incomingRequest.sender_id : incomingRequest.receiver_id;
+                    const user2Id = incomingRequest.sender_id < incomingRequest.receiver_id ? incomingRequest.receiver_id : incomingRequest.sender_id;
+                    
+                    const { error: friendError } = await supabase
+                        .from('friendships')
+                        .insert([{
+                            user1_id: user1Id,
+                            user2_id: user2Id
+                        }]);
+                    
+                    if (friendError) {
+                        console.error('Error creating friendship from existing request:', friendError);
+                        showStatus('Could not create friendship. Please try again.', 'error');
+                        return;
+                    }
+
+                    // Update UI friend lists
+                    addFriendToList(profile.id, profile.name || profile.username || 'Unknown');
+                    addFriendToSidebar(profile.id, profile.name || profile.username || 'Unknown');
+
+                    showStatus('Friend request already existed - you are now friends!', 'success');
+                    closeModal('addFriendModal');
+                    document.getElementById('addFriendForm').reset();
+                    await updateFriendRequestsBadge();
+                    return;
+                }
+
+                // Otherwise, a request you already sent is still pending
                 showStatus('Friend request already exists', 'error');
                 return;
             }
