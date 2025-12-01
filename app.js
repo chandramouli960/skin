@@ -11,6 +11,7 @@ let cacheTimestamp = null;
 const CACHE_DURATION = 30000; // 30 seconds
 let currentGroupChatId = null; // Store groupId for group chat
 let groupChatPollInterval = null; // Polling interval for group chat
+let groupMessageChannel = null; // Real-time channel for group messages
 
 // Initialize Supabase when ready
 function initSupabase() {
@@ -83,6 +84,19 @@ function initializeApp() {
                     supabase.removeChannel(messageChannel);
                     messageChannel = null;
                 }
+            }
+
+            // Clean up group chat resources when closing group chat modal
+            if (modalId === 'groupChatModal') {
+                if (groupChatPollInterval) {
+                    clearInterval(groupChatPollInterval);
+                    groupChatPollInterval = null;
+                }
+                if (groupMessageChannel) {
+                    supabase.removeChannel(groupMessageChannel);
+                    groupMessageChannel = null;
+                }
+                currentGroupChatId = null;
             }
             
             // Reset any forms in the modal
@@ -236,11 +250,9 @@ function initializeApp() {
         updateLastSeen();
         // Update last seen every 30 seconds
         setInterval(updateLastSeen, 30000);
-        // Load dashboard sidebar
-        setTimeout(() => {
-            loadSidebarFriends();
-            updateFriendRequestsBadge();
-        }, 500);
+        // Load dashboard sidebar once on app load
+        loadSidebarFriends();
+        updateFriendRequestsBadge();
     }
 
     // Generate a stable 4-digit discriminator from a UUID (like Discord)
@@ -1710,25 +1722,125 @@ function initializeApp() {
     
     // ========== GROUP CHAT ==========
     
+    let currentGroupProfiles = {}; // Cache of profiles for current group chat
+    
+    // Helper to clean up group chat resources
+    async function cleanupGroupChat() {
+        if (groupChatPollInterval) {
+            clearInterval(groupChatPollInterval);
+            groupChatPollInterval = null;
+        }
+        if (groupMessageChannel) {
+            await supabase.removeChannel(groupMessageChannel);
+            groupMessageChannel = null;
+        }
+        currentGroupChatId = null;
+        currentGroupProfiles = {};
+    }
+
     // Open group chat modal
     window.openGroupChat = async (groupId, groupName) => {
+        // Ensure any previous subscriptions/intervals are cleaned up
+        await cleanupGroupChat();
+
         currentGroupChatId = groupId;
         document.getElementById('groupChatTitle').textContent = `${groupName} - Chat`;
         openModal('groupChatModal');
         await loadGroupMessages(groupId);
-        
-        // Start polling for new messages
-        if (groupChatPollInterval) {
-            clearInterval(groupChatPollInterval);
-        }
-        groupChatPollInterval = setInterval(() => {
-            if (currentGroupChatId === groupId) {
-                loadGroupMessages(groupId);
-            }
-        }, 3000);
+
+        // Set up real-time subscription for new group messages
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        groupMessageChannel = supabase
+            .channel(`group_messages:${groupId}`, {
+                config: {
+                    broadcast: { self: true }
+                }
+            })
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'group_messages'
+            }, async (payload) => {
+                try {
+                    const message = payload.new;
+                    if (!message) return;
+
+                    // Only handle messages for the currently open group
+                    if (!currentGroupChatId || message.group_id !== currentGroupChatId) {
+                        return;
+                    }
+
+                    const messagesList = document.getElementById('groupMessagesList');
+                    if (!messagesList) return;
+
+                    // Skip if message already exists (e.g., optimistic UI already rendered it)
+                    if (messagesList.querySelector(`[data-message-id="${message.id}"]`)) {
+                        return;
+                    }
+
+                    // Ensure we have sender profile info
+                    let senderProfile = currentGroupProfiles[message.sender_id];
+                    if (!senderProfile) {
+                        const { data: profile } = await supabase
+                            .from('profiles')
+                            .select('id, name, username')
+                            .eq('id', message.sender_id)
+                            .maybeSingle();
+
+                        if (profile) {
+                            currentGroupProfiles[profile.id] = profile;
+                            senderProfile = profile;
+                        }
+                    }
+
+                    const isOwn = message.sender_id === user.id;
+                    const senderName = senderProfile?.name || senderProfile?.username || 'Unknown';
+                    const time = formatDate(message.created_at) + ' ' + new Date(message.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `message ${isOwn ? 'sent' : 'received'}`;
+                    messageDiv.setAttribute('data-message-id', message.id);
+                    messageDiv.style.opacity = '0';
+                    messageDiv.style.transform = 'translateY(10px)';
+                    messageDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                    messageDiv.innerHTML = `
+                        ${!isOwn ? `<div class="message-sender">${escapeHtml(senderName)}</div>` : ''}
+                        <div class="message-bubble">${escapeHtml(message.content)}</div>
+                        <div class="message-time">${time}</div>
+                    `;
+
+                    const wasAtBottom = messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 50;
+                    messagesList.appendChild(messageDiv);
+
+                    // Animate in
+                    requestAnimationFrame(() => {
+                        messageDiv.style.opacity = '1';
+                        messageDiv.style.transform = 'translateY(0)';
+                    });
+
+                    // Auto-scroll only if user was at bottom
+                    if (wasAtBottom) {
+                        requestAnimationFrame(() => {
+                            messagesList.scrollTop = messagesList.scrollHeight;
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error handling real-time group message:', error);
+                }
+            })
+            .subscribe((status, err) => {
+                if (err) {
+                    console.error('Group messages subscription error:', err);
+                }
+                if (status === 'CHANNEL_ERROR') {
+                    console.error('Group messages channel error - real-time may not be enabled');
+                }
+            });
     };
     
-    // Load group messages
+    // Load group messages (initial and manual refresh)
     async function loadGroupMessages(groupId) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
@@ -1760,11 +1872,13 @@ function initializeApp() {
                 .select('id, name, username')
                 .in('id', senderIds);
             
-            // Create a map for quick lookup
+            // Create a map for quick lookup and cache it for real-time handler
             const profileMap = {};
+            currentGroupProfiles = {};
             if (profiles) {
                 profiles.forEach(profile => {
                     profileMap[profile.id] = profile;
+                    currentGroupProfiles[profile.id] = profile;
                 });
             }
             
@@ -1869,17 +1983,6 @@ function initializeApp() {
             sendBtn.textContent = 'Send';
         }
     }
-    
-    // Cleanup group chat polling when modal closes
-    document.getElementById('groupChatModal')?.addEventListener('click', (e) => {
-        if (e.target.id === 'groupChatModal' || e.target.classList.contains('modal-close')) {
-            if (groupChatPollInterval) {
-                clearInterval(groupChatPollInterval);
-                groupChatPollInterval = null;
-            }
-            currentGroupChatId = null;
-        }
-    });
     
     // ========== GROUP ANALYTICS ==========
     
@@ -2601,9 +2704,6 @@ function initializeApp() {
             console.error('Error updating friend requests badge:', error);
         }
     }
-    
-    // Update badge periodically
-    setInterval(updateFriendRequestsBadge, 10000); // Every 10 seconds
     
     // Load sidebar friends
     async function loadSidebarFriends() {
