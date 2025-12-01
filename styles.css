@@ -204,7 +204,7 @@ body {
 }
 
 .app-main.with-sidebar {
-    /* On mobile we override this to 0; on desktop the sidebar takes 280px */
+    /* Sidebar is removed; keep main content full width on all devices */
     margin-left: 0;
     background: var(--bg);
     min-height: 100vh;
@@ -720,7 +720,8 @@ body {
     }
     
     .app-main.with-sidebar {
-        margin-left: 280px;
+        /* Sidebar is removed on desktop as well */
+        margin-left: 0;
         background: var(--bg);
     }
     
@@ -736,7 +737,7 @@ body {
     
     .app-header {
         padding: 20px 30px;
-        margin-left: 280px;
+        margin-left: 0;
         transition: margin-left 0.3s ease;
     }
     
@@ -760,21 +761,11 @@ body {
 
 /* Dashboard Overlay */
 .dashboard-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 56px; /* match mobile sidebar so it doesn't cover bottom nav */
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 49;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    display: none !important; /* sidebar removed globally */
 }
 
 .dashboard-overlay.active {
-    display: block;
-    opacity: 1;
+    display: none !important;
 }
 
 /* Dashboard Toggle Button */
@@ -806,18 +797,7 @@ body {
 
 /* Responsive - Mobile */
 @media (max-width: 767px) {
-    /* Hide the left dashboard completely on mobile.
-       Users can still access Groups / Goals / Progress / Friends
-       via the bottom navigation, so this avoids alignment and
-       clipping issues without needing scrolling. */
-    .dashboard-sidebar {
-        display: none !important;
-    }
-
-    .dashboard-overlay {
-        display: none !important;
-    }
-
+    /* Sidebar is removed; just adjust spacing for smaller screens */
     .app-main.with-sidebar {
         margin-left: 0;
     }
@@ -1181,21 +1161,10 @@ body {
     line-height: 1.2;
 }
 
-/* Dashboard Sidebar (desktop layout by default) */
+/* Dashboard Sidebar – fully removed (web and mobile).
+   The layout now relies only on top/bottom navigation. */
 .dashboard-sidebar {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 280px;
-    background: var(--card-bg);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    z-index: 50;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    display: none !important;
 }
 
 .dashboard-content {
