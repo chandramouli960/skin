@@ -1202,7 +1202,10 @@ body {
     flex-direction: column;
     z-index: 50;
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
-    overflow-y: auto;
+    /* Always allow vertical scrolling so the full Friends section is reachable,
+       even when content is short on mobile. The scrollbar visibility itself
+       depends on the browser/OS, but scrolling is always enabled. */
+    overflow-y: scroll;
     -webkit-overflow-scrolling: touch;
 }
 
