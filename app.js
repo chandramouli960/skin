@@ -2658,12 +2658,6 @@ function initializeApp() {
     const dashboardToggleBtn = document.getElementById('dashboardToggleBtn');
     const dashboardSidebar = document.querySelector('.dashboard-sidebar');
     const dashboardOverlay = document.getElementById('dashboardOverlay');
-
-    // Ensure dashboard sidebar is vertically scrollable when content overflows
-    if (dashboardSidebar) {
-        dashboardSidebar.style.overflowY = 'auto';
-        dashboardSidebar.style.webkitOverflowScrolling = 'touch'; // smooth scrolling on mobile
-    }
     
     function toggleDashboard() {
         if (dashboardSidebar && dashboardOverlay) {
