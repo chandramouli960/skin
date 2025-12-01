@@ -125,6 +125,20 @@
                     <p class="loading">Loading progress...</p>
                 </div>
             </div>
+
+            <!-- Friends Tab -->
+            <div id="friendsTab" class="tab-content">
+                <div class="section-header">
+                    <h2>Friends</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="friendRequestsBtn" class="btn btn-secondary btn-small">Requests</button>
+                        <button id="addFriendBtn" class="btn btn-primary btn-small">+ Add Friend</button>
+                    </div>
+                </div>
+                <div id="friendsList" class="cards-list">
+                    <p class="loading">Loading friends...</p>
+                </div>
+            </div>
         </main>
 
         <!-- Bottom Navigation (Mobile) -->
@@ -140,6 +154,10 @@
             <button class="nav-item" data-tab="progressTab">
                 <span class="nav-icon">📊</span>
                 <span class="nav-label">Progress</span>
+            </button>
+            <button class="nav-item" data-tab="friendsTab">
+                <span class="nav-icon">💬</span>
+                <span class="nav-label">Friends</span>
             </button>
         </nav>
 
@@ -257,6 +275,53 @@
             </div>
             <div id="goalDetailsContent">
                 <!-- Goal info, progress entries, comments will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Friend Modal -->
+    <div id="addFriendModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Friend</h3>
+                <button class="modal-close" data-modal="addFriendModal">&times;</button>
+            </div>
+            <form id="addFriendForm">
+                <div class="form-group">
+                    <label for="friendUsername">Username</label>
+                    <input type="text" id="friendUsername" placeholder="Enter username" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Send Friend Request</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Friend Requests Modal -->
+    <div id="friendRequestsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Friend Requests</h3>
+                <button class="modal-close" data-modal="friendRequestsModal">&times;</button>
+            </div>
+            <div id="friendRequestsList">
+                <p class="loading">Loading requests...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Modal -->
+    <div id="messageModal" class="modal modal-large">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="messageModalTitle">Messages</h3>
+                <button class="modal-close" data-modal="messageModal">&times;</button>
+            </div>
+            <div id="messageContent" class="message-container">
+                <div id="messagesList" class="messages-list"></div>
+                <div class="message-input-container">
+                    <input type="text" id="messageInput" placeholder="Type a message..." />
+                    <button id="sendMessageBtn" class="btn btn-primary">Send</button>
+                </div>
             </div>
         </div>
     </div>
