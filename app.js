@@ -398,6 +398,24 @@ function initializeApp() {
         });
     }
 
+    // Profile dropdown functionality
+    const profileBtn = document.getElementById('profileBtn');
+    const profileDropdown = document.getElementById('profileDropdown');
+    
+    if (profileBtn && profileDropdown) {
+        profileBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            profileDropdown.classList.toggle('show');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!profileBtn.contains(e.target) && !profileDropdown.contains(e.target)) {
+                profileDropdown.classList.remove('show');
+            }
+        });
+    }
+    
     // Handle logout
     document.getElementById('logoutBtn')?.addEventListener('click', async () => {
         try {
@@ -405,6 +423,9 @@ function initializeApp() {
             if (error) throw error;
             showStatus('Logged out successfully', 'success');
             clearCache();
+            if (profileDropdown) {
+                profileDropdown.classList.remove('show');
+            }
         } catch (error) {
             console.error('Logout error:', error);
             showStatus(getErrorMessage(error), 'error');
@@ -817,11 +838,39 @@ function initializeApp() {
             });
         }
         
+        // Get reactions for all goals
+        const { data: allReactions } = currentUser ? await supabase
+            .from('reactions')
+            .select('*')
+            .in('goal_id', goalIds) : { data: [] };
+        
+        // Count reactions per goal
+        const reactionCounts = {};
+        const userReactions = {};
+        if (allReactions) {
+            allReactions.forEach(reaction => {
+                const key = reaction.goal_id;
+                if (!reactionCounts[key]) {
+                    reactionCounts[key] = { likes: 0, dislikes: 0 };
+                }
+                if (reaction.reaction_type === 'like') {
+                    reactionCounts[key].likes++;
+                } else {
+                    reactionCounts[key].dislikes++;
+                }
+                if (reaction.user_id === currentUser?.id) {
+                    userReactions[key] = reaction.reaction_type;
+                }
+            });
+        }
+        
         goalsList.innerHTML = goals.map(goal => {
             const progressCount = progressCounts[goal.id] || 0;
             const progressPercent = goal.target_days ? Math.min((progressCount / goal.target_days) * 100, 100) : 0;
             const groupName = goal.groups ? ` • ${escapeHtml(goal.groups.name)}` : '';
             const isOwner = goal.user_id === currentUser?.id;
+            const reactions = reactionCounts[goal.id] || { likes: 0, dislikes: 0 };
+            const userReaction = userReactions[goal.id];
             
             return `
                 <div class="card">
@@ -843,6 +892,16 @@ function initializeApp() {
                             <div class="progress-fill" style="width: ${progressPercent}%"></div>
                         </div>
                         <div class="progress-text">${Math.round(progressPercent)}% complete</div>
+                    </div>
+                    <div class="reaction-buttons" onclick="event.stopPropagation();">
+                        <button class="reaction-btn like ${userReaction === 'like' ? 'active' : ''}" onclick="toggleReaction('${goal.id}', null, 'like')">
+                            <span>👍</span>
+                            <span class="reaction-count">${reactions.likes}</span>
+                        </button>
+                        <button class="reaction-btn dislike ${userReaction === 'dislike' ? 'active' : ''}" onclick="toggleReaction('${goal.id}', null, 'dislike')">
+                            <span>👎</span>
+                            <span class="reaction-count">${reactions.dislikes}</span>
+                        </button>
                     </div>
                 </div>
             `;
@@ -1181,6 +1240,33 @@ function initializeApp() {
                 comments: commentsByProgress[entry.id] || []
             }));
             
+            // Get reactions for comments
+            const commentIds = (allComments || []).map(c => c.id);
+            const { data: commentReactions } = currentUser && commentIds.length > 0 ? await supabase
+                .from('reactions')
+                .select('*')
+                .in('comment_id', commentIds) : { data: [] };
+            
+            // Count reactions per comment
+            const commentReactionCounts = {};
+            const userCommentReactions = {};
+            if (commentReactions) {
+                commentReactions.forEach(reaction => {
+                    const key = reaction.comment_id;
+                    if (!commentReactionCounts[key]) {
+                        commentReactionCounts[key] = { likes: 0, dislikes: 0 };
+                    }
+                    if (reaction.reaction_type === 'like') {
+                        commentReactionCounts[key].likes++;
+                    } else {
+                        commentReactionCounts[key].dislikes++;
+                    }
+                    if (reaction.user_id === currentUser?.id) {
+                        userCommentReactions[key] = reaction.reaction_type;
+                    }
+                });
+            }
+            
             const content = `
                 <div style="padding: 20px;">
                     <p style="color: var(--text-light); margin-bottom: 20px;">${escapeHtml(goalToShow.description || 'No description')}</p>
@@ -1209,6 +1295,8 @@ function initializeApp() {
                                         <div class="comments-list">
                                             ${entry.comments.map(comment => {
                                                 const isCommentOwner = comment.user_id === currentUser?.id;
+                                                const reactions = commentReactionCounts[comment.id] || { likes: 0, dislikes: 0 };
+                                                const userReaction = userCommentReactions[comment.id];
                                                 return `
                                                     <div class="comment">
                                                         <div class="comment-header">
@@ -1219,6 +1307,16 @@ function initializeApp() {
                                                             </div>
                                                         </div>
                                                         <div class="comment-content">${escapeHtml(comment.content)}</div>
+                                                        <div class="reaction-buttons">
+                                                            <button class="reaction-btn like ${userReaction === 'like' ? 'active' : ''}" onclick="toggleReaction(null, '${comment.id}', 'like')">
+                                                                <span>👍</span>
+                                                                <span class="reaction-count">${reactions.likes}</span>
+                                                            </button>
+                                                            <button class="reaction-btn dislike ${userReaction === 'dislike' ? 'active' : ''}" onclick="toggleReaction(null, '${comment.id}', 'dislike')">
+                                                                <span>👎</span>
+                                                                <span class="reaction-count">${reactions.dislikes}</span>
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 `;
                                             }).join('')}
@@ -1242,6 +1340,81 @@ function initializeApp() {
         }
     }
 
+    // Toggle reaction (like/dislike) for goals or comments
+    window.toggleReaction = async (goalId, commentId, reactionType) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            showStatus('Please log in to react', 'error');
+            return;
+        }
+        
+        try {
+            // Check if user already has a reaction
+            let query = supabase
+                .from('reactions')
+                .select('*')
+                .eq('user_id', user.id);
+            
+            if (goalId) {
+                query = query.eq('goal_id', goalId).is('comment_id', null);
+            } else if (commentId) {
+                query = query.eq('comment_id', commentId).is('goal_id', null);
+            }
+            
+            const { data: existing } = await query;
+            
+            if (existing && existing.length > 0) {
+                const existingReaction = existing[0];
+                // If clicking the same reaction, remove it
+                if (existingReaction.reaction_type === reactionType) {
+                    const { error } = await supabase
+                        .from('reactions')
+                        .delete()
+                        .eq('id', existingReaction.id);
+                    
+                    if (error) throw error;
+                } else {
+                    // Update to different reaction type
+                    const { error } = await supabase
+                        .from('reactions')
+                        .update({ reaction_type: reactionType })
+                        .eq('id', existingReaction.id);
+                    
+                    if (error) throw error;
+                }
+            } else {
+                // Create new reaction
+                const reactionData = {
+                    user_id: user.id,
+                    reaction_type: reactionType
+                };
+                
+                if (goalId) {
+                    reactionData.goal_id = goalId;
+                } else if (commentId) {
+                    reactionData.comment_id = commentId;
+                }
+                
+                const { error } = await supabase
+                    .from('reactions')
+                    .insert([reactionData]);
+                
+                if (error) throw error;
+            }
+            
+            // Reload the view
+            if (goalId) {
+                clearCache();
+                await loadGoals(true);
+            } else if (commentId && currentViewingGoalId) {
+                await viewGoalDetails(currentViewingGoalId);
+            }
+        } catch (error) {
+            console.error('Error toggling reaction:', error);
+            showStatus(getErrorMessage(error), 'error');
+        }
+    };
+    
     // Make functions global for onclick handlers
     window.viewGroup = viewGroup;
     window.viewGoalDetails = viewGoalDetails;
