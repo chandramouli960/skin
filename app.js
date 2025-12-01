@@ -77,9 +77,11 @@ function initializeApp() {
             // Handle message modal cleanup
             if (modalId === 'messageModal') {
                 currentMessagingFriendId = null;
-                if (messagePollInterval) {
-                    clearInterval(messagePollInterval);
-                    messagePollInterval = null;
+                lastLoadedMessageTimestamp = null; // Reset when closing modal
+                // Clean up real-time subscription
+                if (messageChannel) {
+                    supabase.removeChannel(messageChannel);
+                    messageChannel = null;
                 }
             }
             
@@ -2742,7 +2744,8 @@ function initializeApp() {
     // ========== FRIENDS ==========
     
     let currentMessagingFriendId = null;
-    let messagePollInterval = null;
+    let messageChannel = null; // Real-time subscription channel
+    let lastLoadedMessageTimestamp = null; // Track last loaded message timestamp for seamless updates
     
     // Load friends list
     async function loadFriends() {
@@ -3056,6 +3059,7 @@ function initializeApp() {
         if (!user) return;
         
         try {
+            // Fetch requests with proper filtering
             const { data: requests, error } = await supabase
                 .from('friend_requests')
                 .select('*')
@@ -3063,13 +3067,17 @@ function initializeApp() {
                 .eq('status', 'pending')
                 .order('created_at', { ascending: false });
             
-            if (error) throw error;
+            if (error) {
+                console.error('Error loading friend requests:', error);
+                throw error;
+            }
             
             const requestsList = document.getElementById('friendRequestsList');
             if (!requestsList) return;
             
             if (!requests || requests.length === 0) {
                 requestsList.innerHTML = '<div class="empty-state"><p>No pending friend requests</p></div>';
+                await updateFriendRequestsBadge();
                 return;
             }
             
@@ -3077,10 +3085,14 @@ function initializeApp() {
             const userIds = [...new Set(requests.flatMap(r => [r.sender_id, r.receiver_id]))];
             
             // Get profiles
-            const { data: profiles } = await supabase
+            const { data: profiles, error: profilesError } = await supabase
                 .from('profiles')
                 .select('id, name, username')
                 .in('id', userIds);
+            
+            if (profilesError) {
+                console.error('Error loading profiles:', profilesError);
+            }
             
             const profileMap = {};
             if (profiles) {
@@ -3167,53 +3179,47 @@ function initializeApp() {
                 showStatus('Friend request cancelled', 'success');
                 await updateFriendRequestsBadge();
             } else {
-                // Get the request
-                let request;
-                const { data: requestData, error: fetchError } = await supabase
+                // Get the request - use simple query and fetch profiles separately for reliability
+                const { data: simpleRequest, error: simpleError } = await supabase
                     .from('friend_requests')
-                    .select('*, sender:profiles!friend_requests_sender_id_fkey(id, name, username), receiver:profiles!friend_requests_receiver_id_fkey(id, name, username)')
+                    .select('*')
                     .eq('id', requestId)
-                    .single();
+                    .maybeSingle();
                 
-                if (fetchError) {
-                    // Try without foreign key relation
-                    const { data: simpleRequest, error: simpleError } = await supabase
-                        .from('friend_requests')
-                        .select('*')
-                        .eq('id', requestId)
-                        .maybeSingle();
-                    
-                    if (simpleError || !simpleRequest) {
-                        throw fetchError || simpleError || new Error('Request not found');
-                    }
-                    
-                    // Get profiles separately
-                    const userIds = [simpleRequest.sender_id, simpleRequest.receiver_id];
-                    const { data: profiles } = await supabase
-                        .from('profiles')
-                        .select('id, name, username')
-                        .in('id', userIds);
-                    
-                    const profileMap = {};
-                    if (profiles) {
-                        profiles.forEach(p => {
-                            profileMap[p.id] = p;
-                        });
-                    }
-                    
-                    request = {
-                        ...simpleRequest,
-                        sender: profileMap[simpleRequest.sender_id],
-                        receiver: profileMap[simpleRequest.receiver_id]
-                    };
-                } else {
-                    request = requestData;
+                if (simpleError || !simpleRequest) {
+                    throw simpleError || new Error('Request not found');
                 }
                 
-                // Ensure request exists
-                if (!request) {
-                    throw new Error('Request not found');
+                // Verify user has permission (must be receiver for accept/reject, sender for cancel)
+                if (action === 'accept' || action === 'reject') {
+                    if (simpleRequest.receiver_id !== user.id) {
+                        throw new Error('You can only accept/reject requests sent to you');
+                    }
                 }
+                
+                // Get profiles separately
+                const userIds = [simpleRequest.sender_id, simpleRequest.receiver_id];
+                const { data: profiles, error: profilesError } = await supabase
+                    .from('profiles')
+                    .select('id, name, username')
+                    .in('id', userIds);
+                
+                if (profilesError) {
+                    console.error('Error fetching profiles:', profilesError);
+                }
+                
+                const profileMap = {};
+                if (profiles) {
+                    profiles.forEach(p => {
+                        profileMap[p.id] = p;
+                    });
+                }
+                
+                const request = {
+                    ...simpleRequest,
+                    sender: profileMap[simpleRequest.sender_id],
+                    receiver: profileMap[simpleRequest.receiver_id]
+                };
                 
                 if (action === 'accept') {
                     // Optimistically remove request and add friend
@@ -3224,35 +3230,61 @@ function initializeApp() {
                         setTimeout(() => requestCard.remove(), 300);
                     }
                     
-                    // Update request status
+                    // Update request status - ensure user is receiver
                     const { error: updateError } = await supabase
                         .from('friend_requests')
                         .update({ status: 'accepted' })
-                        .eq('id', requestId);
+                        .eq('id', requestId)
+                        .eq('receiver_id', user.id);
                     
-                    if (updateError) throw updateError;
+                    if (updateError) {
+                        console.error('Error updating friend request:', updateError);
+                        throw updateError;
+                    }
                     
-                    // Create friendship
+                    // Create friendship - ensure no duplicate
                     const user1Id = request.sender_id < request.receiver_id ? request.sender_id : request.receiver_id;
                     const user2Id = request.sender_id < request.receiver_id ? request.receiver_id : request.sender_id;
                     
-                    const { error: friendError } = await supabase
+                    // Check if friendship already exists
+                    const { data: existingFriendship } = await supabase
                         .from('friendships')
-                        .insert([{
-                            user1_id: user1Id,
-                            user2_id: user2Id
-                        }]);
+                        .select('id')
+                        .eq('user1_id', user1Id)
+                        .eq('user2_id', user2Id)
+                        .maybeSingle();
                     
-                    if (friendError) throw friendError;
+                    if (!existingFriendship) {
+                        const { error: friendError } = await supabase
+                            .from('friendships')
+                            .insert([{
+                                user1_id: user1Id,
+                                user2_id: user2Id
+                            }]);
+                        
+                        if (friendError) {
+                            console.error('Error creating friendship:', friendError);
+                            // If friendship creation fails but request was updated, that's okay
+                            // (might already exist from previous attempt)
+                            if (!friendError.message?.includes('duplicate') && !friendError.message?.includes('unique')) {
+                                throw friendError;
+                            }
+                        }
+                    }
                     
                     // Add friend to lists smoothly
                     const otherUser = request.receiver_id === user.id ? request.sender : request.receiver;
-                    if (otherUser) {
-                        addFriendToList(otherUser.id, otherUser.name || otherUser.username || 'Unknown');
-                        addFriendToSidebar(otherUser.id, otherUser.name || otherUser.username || 'Unknown');
-                    }
+                    const otherUserName = otherUser?.name || otherUser?.username || 'Unknown';
+                    
+                    addFriendToList(request.sender_id, request.sender?.name || request.sender?.username || 'Unknown');
+                    addFriendToSidebar(request.sender_id, request.sender?.name || request.sender?.username || 'Unknown');
                     
                     showStatus('Friend request accepted!', 'success');
+                    
+                    // Reload friends list to refresh
+                    if (document.getElementById('friendsTab')?.classList.contains('active')) {
+                        loadFriends();
+                    }
                 } else if (action === 'reject') {
                     // Optimistically remove from UI
                     if (requestCard) {
@@ -3262,12 +3294,17 @@ function initializeApp() {
                         setTimeout(() => requestCard.remove(), 300);
                     }
                     
+                    // Update request status - ensure user is receiver
                     const { error } = await supabase
                         .from('friend_requests')
                         .update({ status: 'rejected' })
-                        .eq('id', requestId);
+                        .eq('id', requestId)
+                        .eq('receiver_id', user.id);
                     
-                    if (error) throw error;
+                    if (error) {
+                        console.error('Error rejecting friend request:', error);
+                        throw error;
+                    }
                     showStatus('Friend request rejected', 'success');
                 }
                 
@@ -3360,77 +3397,254 @@ function initializeApp() {
     
     // Open message modal
     window.openMessageModal = async (friendId, friendName) => {
-        currentMessagingFriendId = friendId;
-        document.getElementById('messageModalTitle').textContent = `Messages with ${friendName}`;
-        openModal('messageModal');
-        await loadMessages(friendId);
-        
-        // Start polling for new messages
-        if (messagePollInterval) {
-            clearInterval(messagePollInterval);
-        }
-        messagePollInterval = setInterval(() => {
-            if (currentMessagingFriendId === friendId) {
-                loadMessages(friendId);
-            }
-        }, 3000); // Poll every 3 seconds
-    };
-    
-    // Load messages
-    async function loadMessages(friendId) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
         
-        try {
-            // Get messages
-            const { data: messages, error } = await supabase
-                .from('messages')
-                .select('*')
-                .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-                .order('created_at', { ascending: true })
-                .limit(50);
-            
-            if (error) throw error;
-            
-            // Mark messages as read
+        // Clean up any existing subscription
+        if (messageChannel) {
+            await supabase.removeChannel(messageChannel);
+            messageChannel = null;
+        }
+        
+        currentMessagingFriendId = friendId;
+        lastLoadedMessageTimestamp = null; // Reset when opening new conversation
+        document.getElementById('messageModalTitle').textContent = `Messages with ${friendName}`;
+        openModal('messageModal');
+        await loadMessages(friendId, true); // true = initial load
+        
+        // Set up real-time subscription for new messages
+        messageChannel = supabase
+            .channel(`messages:${friendId}:${user.id}`)
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'messages'
+            }, (payload) => {
+                const message = payload.new;
+                // Only process if it's for the current conversation
+                // Check if message is between current user and friend
+                const isBetweenUsers = (message.sender_id === user.id && message.receiver_id === friendId) ||
+                                      (message.sender_id === friendId && message.receiver_id === user.id);
+                
+                if (currentMessagingFriendId === friendId && isBetweenUsers) {
+                    handleNewMessage(message);
+                }
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log('Real-time messages subscribed');
+                }
+            });
+    };
+    
+    // Handle new message from real-time subscription
+    async function handleNewMessage(message) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        const messagesList = document.getElementById('messagesList');
+        if (!messagesList) return;
+        
+        // Check if message already exists (prevent duplicates)
+        const existingMessage = messagesList.querySelector(`[data-message-id="${message.id}"]`);
+        if (existingMessage) {
+            // Update temp ID to real ID if it exists
+            if (existingMessage.getAttribute('data-message-id').startsWith('temp_')) {
+                existingMessage.setAttribute('data-message-id', message.id);
+                existingMessage.style.opacity = '1';
+            }
+            return;
+        }
+        
+        // Also check for duplicate by content and recent timestamp (for optimistic messages)
+        const isSent = message.sender_id === user.id;
+        if (isSent) {
+            const existingByContent = Array.from(messagesList.querySelectorAll('.message.sent .message-bubble'))
+                .find(el => el.textContent.trim() === message.content.trim());
+            if (existingByContent) {
+                // Update the existing optimistic message
+                const optimisticMsg = existingByContent.closest('.message');
+                optimisticMsg.setAttribute('data-message-id', message.id);
+                optimisticMsg.style.opacity = '1';
+                return;
+            }
+        }
+        
+        // Check if user is at bottom (within 50px) to auto-scroll after update
+        const wasAtBottom = messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 50;
+        const time = formatDate(message.created_at) + ' ' + new Date(message.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+        messageDiv.setAttribute('data-message-id', message.id);
+        messageDiv.style.opacity = '0';
+        messageDiv.style.transform = 'translateY(10px)';
+        messageDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        messageDiv.innerHTML = `
+            <div class="message-bubble">${escapeHtml(message.content)}</div>
+            <div class="message-time">${time}</div>
+        `;
+        
+        messagesList.appendChild(messageDiv);
+        
+        // Animate in
+        setTimeout(() => {
+            messageDiv.style.opacity = '1';
+            messageDiv.style.transform = 'translateY(0)';
+        }, 50);
+        
+        // Mark as read if received message
+        if (!isSent) {
             await supabase
                 .from('messages')
                 .update({ is_read: true })
-                .eq('receiver_id', user.id)
-                .eq('sender_id', friendId)
-                .eq('is_read', false);
+                .eq('id', message.id)
+                .eq('receiver_id', user.id);
             
-            const messagesList = document.getElementById('messagesList');
-            if (!messagesList) return;
+            // Update friends list to refresh unread counts
+            if (document.getElementById('friendsTab')?.classList.contains('active')) {
+                loadFriends();
+            }
+            if (document.getElementById('friendsDashboard')?.classList.contains('active')) {
+                loadSidebarFriends();
+            }
+        }
+        
+        // Update last loaded timestamp
+        lastLoadedMessageTimestamp = message.created_at;
+        
+        // Auto-scroll only if user was at bottom
+        if (wasAtBottom) {
+            setTimeout(() => {
+                messagesList.scrollTop = messagesList.scrollHeight;
+            }, 100);
+        }
+    }
+    
+    // Load messages - seamless updates like WhatsApp
+    async function loadMessages(friendId, isInitialLoad = false) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        const messagesList = document.getElementById('messagesList');
+        if (!messagesList) return;
+        
+        try {
+            let query = supabase
+                .from('messages')
+                .select('*')
+                .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`);
             
-            if (!messages || messages.length === 0) {
-                messagesList.innerHTML = '<div class="empty-state"><p>No messages yet. Start the conversation!</p></div>';
-                return;
+            // If incremental load, only get new messages after last timestamp
+            if (!isInitialLoad && lastLoadedMessageTimestamp) {
+                query = query.gt('created_at', lastLoadedMessageTimestamp);
             }
             
-            messagesList.innerHTML = messages.map(msg => {
-                const isSent = msg.sender_id === user.id;
-                const time = formatDate(msg.created_at) + ' ' + new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            const { data: messages, error } = await query
+                .order('created_at', { ascending: true })
+                .limit(isInitialLoad ? 100 : 50);
+            
+            if (error) throw error;
+            
+            // Mark new messages as read
+            if (messages && messages.length > 0) {
+                const unreadIds = messages
+                    .filter(msg => msg.receiver_id === user.id && msg.sender_id === friendId && !msg.is_read)
+                    .map(msg => msg.id);
                 
-                return `
-                    <div class="message ${isSent ? 'sent' : 'received'}">
-                        <div class="message-bubble">${escapeHtml(msg.content)}</div>
-                        <div class="message-time">${time}</div>
-                    </div>
-                `;
-            }).join('');
+                if (unreadIds.length > 0) {
+                    await supabase
+                        .from('messages')
+                        .update({ is_read: true })
+                        .in('id', unreadIds);
+                }
+            }
             
-            // Scroll to bottom
-            messagesList.scrollTop = messagesList.scrollHeight;
+            // Check if user is at bottom (within 50px) to auto-scroll after update
+            const wasAtBottom = messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 50;
             
-            // Reload friends to update unread counts
-            if (document.getElementById('friendsTab')?.classList.contains('active')) {
+            if (isInitialLoad || !lastLoadedMessageTimestamp) {
+                // Initial load - replace all messages
+                if (!messages || messages.length === 0) {
+                    messagesList.innerHTML = '<div class="empty-state"><p>No messages yet. Start the conversation!</p></div>';
+                    lastLoadedMessageTimestamp = null;
+                    return;
+                }
+                
+                messagesList.innerHTML = messages.map(msg => {
+                    const isSent = msg.sender_id === user.id;
+                    const time = formatDate(msg.created_at) + ' ' + new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                    
+                    return `
+                        <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${msg.id}">
+                            <div class="message-bubble">${escapeHtml(msg.content)}</div>
+                            <div class="message-time">${time}</div>
+                        </div>
+                    `;
+                }).join('');
+                
+                // Update last loaded message timestamp
+                lastLoadedMessageTimestamp = messages[messages.length - 1].created_at;
+                
+                // Scroll to bottom on initial load
+                setTimeout(() => {
+                    messagesList.scrollTop = messagesList.scrollHeight;
+                }, 10);
+            } else if (messages && messages.length > 0) {
+                // Incremental load - only append new messages
+                const existingMessageIds = new Set(
+                    Array.from(messagesList.querySelectorAll('[data-message-id]'))
+                        .map(el => el.getAttribute('data-message-id'))
+                );
+                
+                // Filter out messages that already exist (in case of duplicates)
+                const newMessages = messages.filter(msg => !existingMessageIds.has(msg.id));
+                
+                if (newMessages.length > 0) {
+                    // Append new messages with smooth animation
+                    newMessages.forEach((msg, index) => {
+                        const isSent = msg.sender_id === user.id;
+                        const time = formatDate(msg.created_at) + ' ' + new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                        
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+                        messageDiv.setAttribute('data-message-id', msg.id);
+                        messageDiv.style.opacity = '0';
+                        messageDiv.style.transform = 'translateY(10px)';
+                        messageDiv.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                        messageDiv.innerHTML = `
+                            <div class="message-bubble">${escapeHtml(msg.content)}</div>
+                            <div class="message-time">${time}</div>
+                        `;
+                        
+                        messagesList.appendChild(messageDiv);
+                        
+                        // Animate in with slight delay for smooth effect
+                        setTimeout(() => {
+                            messageDiv.style.opacity = '1';
+                            messageDiv.style.transform = 'translateY(0)';
+                        }, index * 50);
+                    });
+                    
+                    // Update last loaded message timestamp
+                    lastLoadedMessageTimestamp = newMessages[newMessages.length - 1].created_at;
+                    
+                    // Auto-scroll only if user was at bottom
+                    if (wasAtBottom) {
+                        setTimeout(() => {
+                            messagesList.scrollTop = messagesList.scrollHeight;
+                        }, 100);
+                    }
+                }
+            }
+            
+            // Reload friends to update unread counts (throttled)
+            if (isInitialLoad && document.getElementById('friendsTab')?.classList.contains('active')) {
                 loadFriends();
             }
         } catch (error) {
             console.error('Error loading messages:', error);
-            const messagesList = document.getElementById('messagesList');
-            if (messagesList) {
+            if (isInitialLoad) {
                 messagesList.innerHTML = '<div class="empty-state" style="color: var(--error);"><p>Error loading messages</p></div>';
             }
         }
@@ -3501,6 +3715,9 @@ function initializeApp() {
             messageDiv.setAttribute('data-message-id', newMessage.id);
             messageDiv.style.opacity = '1';
             messageDiv.style.transition = 'opacity 0.3s';
+            
+            // Update last loaded message timestamp to prevent duplicates
+            lastLoadedMessageTimestamp = newMessage.created_at;
             
             // Update unread counts in friends list
             if (document.getElementById('friendsTab')?.classList.contains('active')) {
