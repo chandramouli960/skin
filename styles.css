@@ -204,7 +204,8 @@ body {
 }
 
 .app-main.with-sidebar {
-    margin-left: 280px;
+    /* Sidebar is hidden on all breakpoints now, keep main content full width */
+    margin-left: 0;
     background: var(--bg);
     min-height: 100vh;
 }
@@ -719,7 +720,7 @@ body {
     }
     
     .app-main.with-sidebar {
-        margin-left: 280px;
+        margin-left: 0;
         background: var(--bg);
     }
     
@@ -735,7 +736,7 @@ body {
     
     .app-header {
         padding: 20px 30px;
-        margin-left: 280px;
+        margin-left: 0;
         transition: margin-left 0.3s ease;
     }
     
@@ -1182,22 +1183,9 @@ body {
 
 /* Dashboard Sidebar */
 .dashboard-sidebar {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 280px;
-    background: var(--card-bg);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    z-index: 50;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
-    /* Always allow vertical scrolling so the full Friends section is reachable,
-       even when content is short on mobile. The scrollbar visibility itself
-       depends on the browser/OS, but scrolling is always enabled. */
-    overflow-y: scroll;
-    -webkit-overflow-scrolling: touch;
+    /* Sidebar is now purely a desktop enhancement. Hide by default and
+       let desktop-specific rules re-enable it if needed. */
+    display: none;
 }
 
 .dashboard-content {
