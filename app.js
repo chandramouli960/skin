@@ -221,6 +221,7 @@ function initializeApp() {
         // Load dashboard sidebar
         setTimeout(() => {
             loadSidebarFriends();
+            updateFriendRequestsBadge();
         }, 500);
     }
     
@@ -1490,35 +1491,107 @@ function initializeApp() {
         const submitBtn = input.nextElementSibling;
         if (!submitBtn) return;
         
+        // Find comments list for this progress entry
+        const commentsList = input.closest('.add-comment')?.previousElementSibling;
+        if (!commentsList || !commentsList.classList.contains('comments-list')) {
+            // Fallback to reload
+            commentSubmitting.add(progressId);
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Posting...';
+            try {
+                const { error } = await supabase
+                    .from('comments')
+                    .insert([{
+                        progress_id: progressId,
+                        user_id: user.id,
+                        content: content
+                    }]);
+                if (error) throw error;
+                input.value = '';
+                if (currentViewingGoalId) {
+                    await viewGoalDetails(currentViewingGoalId);
+                }
+            } catch (error) {
+                console.error('Error adding comment:', error);
+                showStatus(getErrorMessage(error), 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Post';
+                commentSubmitting.delete(progressId);
+            }
+            return;
+        }
+        
+        // Get user name
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('name, username')
+            .eq('id', user.id)
+            .single();
+        
+        const userName = profile?.name || profile?.username || 'You';
+        
+        // Optimistically add comment to UI
+        const tempComment = document.createElement('div');
+        tempComment.className = 'comment';
+        tempComment.style.opacity = '0.7';
+        tempComment.innerHTML = `
+            <div class="comment-header">
+                <span class="comment-user">${escapeHtml(userName)}</span>
+                <div>
+                    <span class="comment-date">just now</span>
+                </div>
+            </div>
+            <div class="comment-content">${escapeHtml(content)}</div>
+        `;
+        commentsList.appendChild(tempComment);
+        
+        // Scroll to new comment
+        tempComment.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        
+        input.value = '';
         commentSubmitting.add(progressId);
-        const originalText = submitBtn.textContent;
         submitBtn.disabled = true;
         submitBtn.textContent = 'Posting...';
         
         try {
-            const { error } = await supabase
+            const { data: newComment, error } = await supabase
                 .from('comments')
                 .insert([{
                     progress_id: progressId,
                     user_id: user.id,
                     content: content
-                }]);
+                }])
+                .select()
+                .single();
             
             if (error) throw error;
             
-            input.value = '';
-            showStatus('Comment added successfully!', 'success');
+            // Update with real comment data
+            const realDate = formatDate(newComment.created_at);
+            tempComment.setAttribute('data-comment-id', newComment.id);
+            tempComment.style.opacity = '1';
+            tempComment.style.transition = 'opacity 0.3s';
+            tempComment.querySelector('.comment-date').textContent = realDate;
             
-            // Reload goal details using stored goalId
-            if (currentViewingGoalId) {
-                await viewGoalDetails(currentViewingGoalId);
+            // Add delete button if owner
+            if (newComment.user_id === user.id) {
+                const headerDiv = tempComment.querySelector('.comment-header > div');
+                if (headerDiv) {
+                    headerDiv.innerHTML = `
+                        <span class="comment-date">${realDate}</span>
+                        <button class="btn btn-danger btn-small" style="margin-left: 10px; padding: 4px 8px; font-size: 0.8rem;" onclick="deleteComment('${newComment.id}', '${currentViewingGoalId}')" title="Delete">🗑️</button>
+                    `;
+                }
             }
         } catch (error) {
             console.error('Error adding comment:', error);
+            tempComment.remove();
             showStatus(getErrorMessage(error), 'error');
+            input.value = content; // Restore comment
         } finally {
             submitBtn.disabled = false;
-            submitBtn.textContent = originalText;
+            submitBtn.textContent = 'Post';
             commentSubmitting.delete(progressId);
         }
     };
@@ -1551,10 +1624,26 @@ function initializeApp() {
         }
     };
 
-    // Delete progress entry
+    // Delete progress entry - with smooth removal
     window.deleteProgressEntry = async (entryId, goalId) => {
         if (!confirm('Are you sure you want to delete this progress entry? This will also delete all comments on this entry.')) {
             return;
+        }
+        
+        const entryEl = document.querySelector(`[data-entry-id="${entryId}"]`) ||
+                       document.querySelector(`.progress-entry:has(button[onclick*="deleteProgressEntry('${entryId}'"])`);
+        
+        // Optimistically remove from UI
+        if (entryEl) {
+            entryEl.style.transition = 'opacity 0.3s, transform 0.3s, max-height 0.3s, margin 0.3s';
+            entryEl.style.opacity = '0';
+            entryEl.style.transform = 'translateX(-20px)';
+            entryEl.style.maxHeight = entryEl.offsetHeight + 'px';
+            setTimeout(() => {
+                entryEl.style.maxHeight = '0';
+                entryEl.style.margin = '0';
+                setTimeout(() => entryEl.remove(), 300);
+            }, 10);
         }
         
         const { data: { user } } = await supabase.auth.getUser();
@@ -1571,14 +1660,16 @@ function initializeApp() {
             
             showStatus('Progress entry deleted successfully', 'success');
             clearCache();
-            if (goalId) {
-                await viewGoalDetails(goalId);
-            }
+            // Only reload if needed (for progress counts)
             loadGoals(true);
             loadProgress(true);
         } catch (error) {
             console.error('Error deleting progress entry:', error);
             showStatus(getErrorMessage(error), 'error');
+            // Reload on error
+            if (goalId) {
+                await viewGoalDetails(goalId);
+            }
         }
     };
 
@@ -1829,6 +1920,42 @@ function initializeApp() {
     document.getElementById('sidebarAddFriendBtn')?.addEventListener('click', () => {
         openModal('addFriendModal');
     });
+    
+    // Sidebar friend requests button
+    document.getElementById('sidebarFriendRequestsBtn')?.addEventListener('click', async () => {
+        openModal('friendRequestsModal');
+        await loadFriendRequests();
+    });
+    
+    // Update friend requests badge
+    async function updateFriendRequestsBadge() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            const { data: requests } = await supabase
+                .from('friend_requests')
+                .select('id')
+                .eq('receiver_id', user.id)
+                .eq('status', 'pending');
+            
+            const badge = document.getElementById('friendRequestsBadge');
+            if (badge) {
+                const count = requests?.length || 0;
+                if (count > 0) {
+                    badge.textContent = count > 99 ? '99+' : count;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        } catch (error) {
+            console.error('Error updating friend requests badge:', error);
+        }
+    }
+    
+    // Update badge periodically
+    setInterval(updateFriendRequestsBadge, 10000); // Every 10 seconds
     
     // Load sidebar friends
     async function loadSidebarFriends() {
@@ -2207,6 +2334,8 @@ function initializeApp() {
             showStatus('Friend request sent!', 'success');
             closeModal('addFriendModal');
             document.getElementById('addFriendForm').reset();
+            // Update badge (for the receiver)
+            await updateFriendRequestsBadge();
         } catch (error) {
             console.error('Error sending friend request:', error);
             showStatus(getErrorMessage(error), 'error');
@@ -2255,6 +2384,9 @@ function initializeApp() {
                 });
             }
             
+            // Update badge
+            await updateFriendRequestsBadge();
+            
             requestsList.innerHTML = requests.map(request => {
                 const isReceiver = request.receiver_id === user.id;
                 const otherUserId = isReceiver ? request.sender_id : request.receiver_id;
@@ -2300,13 +2432,24 @@ function initializeApp() {
         }
     }
     
-    // Handle friend request (accept/reject/cancel)
+    // Handle friend request (accept/reject/cancel) - with smooth UI updates
     window.handleFriendRequest = async (requestId, action) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
         
+        // Find the request card element for smooth removal
+        const requestCard = document.querySelector(`[onclick*="handleFriendRequest('${requestId}'"]`)?.closest('.friend-request-card');
+        
         try {
             if (action === 'cancel') {
+                // Optimistically remove from UI
+                if (requestCard) {
+                    requestCard.style.transition = 'opacity 0.3s, transform 0.3s';
+                    requestCard.style.opacity = '0';
+                    requestCard.style.transform = 'translateX(-20px)';
+                    setTimeout(() => requestCard.remove(), 300);
+                }
+                
                 // Delete the request
                 const { error } = await supabase
                     .from('friend_requests')
@@ -2316,17 +2459,55 @@ function initializeApp() {
                 
                 if (error) throw error;
                 showStatus('Friend request cancelled', 'success');
+                await updateFriendRequestsBadge();
             } else {
                 // Get the request
                 const { data: request, error: fetchError } = await supabase
                     .from('friend_requests')
-                    .select('*')
+                    .select('*, sender:profiles!friend_requests_sender_id_fkey(id, name, username), receiver:profiles!friend_requests_receiver_id_fkey(id, name, username)')
                     .eq('id', requestId)
                     .single();
                 
-                if (fetchError) throw fetchError;
+                if (fetchError) {
+                    // Try without foreign key relation
+                    const { data: simpleRequest } = await supabase
+                        .from('friend_requests')
+                        .select('*')
+                        .eq('id', requestId)
+                        .single();
+                    
+                    if (!simpleRequest) throw fetchError;
+                    
+                    // Get profiles separately
+                    const userIds = [simpleRequest.sender_id, simpleRequest.receiver_id];
+                    const { data: profiles } = await supabase
+                        .from('profiles')
+                        .select('id, name, username')
+                        .in('id', userIds);
+                    
+                    const profileMap = {};
+                    if (profiles) {
+                        profiles.forEach(p => {
+                            profileMap[p.id] = p;
+                        });
+                    }
+                    
+                    request = {
+                        ...simpleRequest,
+                        sender: profileMap[simpleRequest.sender_id],
+                        receiver: profileMap[simpleRequest.receiver_id]
+                    };
+                }
                 
                 if (action === 'accept') {
+                    // Optimistically remove request and add friend
+                    if (requestCard) {
+                        requestCard.style.transition = 'opacity 0.3s, transform 0.3s';
+                        requestCard.style.opacity = '0';
+                        requestCard.style.transform = 'translateX(-20px)';
+                        setTimeout(() => requestCard.remove(), 300);
+                    }
+                    
                     // Update request status
                     const { error: updateError } = await supabase
                         .from('friend_requests')
@@ -2348,8 +2529,23 @@ function initializeApp() {
                     
                     if (friendError) throw friendError;
                     
+                    // Add friend to lists smoothly
+                    const otherUser = request.receiver_id === user.id ? request.sender : request.receiver;
+                    if (otherUser) {
+                        addFriendToList(otherUser.id, otherUser.name || otherUser.username || 'Unknown');
+                        addFriendToSidebar(otherUser.id, otherUser.name || otherUser.username || 'Unknown');
+                    }
+                    
                     showStatus('Friend request accepted!', 'success');
                 } else if (action === 'reject') {
+                    // Optimistically remove from UI
+                    if (requestCard) {
+                        requestCard.style.transition = 'opacity 0.3s, transform 0.3s';
+                        requestCard.style.opacity = '0';
+                        requestCard.style.transform = 'translateX(-20px)';
+                        setTimeout(() => requestCard.remove(), 300);
+                    }
+                    
                     const { error } = await supabase
                         .from('friend_requests')
                         .update({ status: 'rejected' })
@@ -2358,15 +2554,93 @@ function initializeApp() {
                     if (error) throw error;
                     showStatus('Friend request rejected', 'success');
                 }
+                
+                await updateFriendRequestsBadge();
             }
-            
-            await loadFriendRequests();
-            await loadFriends();
         } catch (error) {
             console.error('Error handling friend request:', error);
             showStatus(getErrorMessage(error), 'error');
+            // Reload on error as fallback
+            await loadFriendRequests();
+            await loadFriends();
         }
     };
+    
+    // Add friend to main friends list smoothly
+    function addFriendToList(friendId, friendName) {
+        const friendsList = document.getElementById('friendsList');
+        if (!friendsList || friendsList.querySelector(`[data-friend-id="${friendId}"]`)) return;
+        
+        const initials = friendName.substring(0, 2).toUpperCase();
+        const friendCard = document.createElement('div');
+        friendCard.className = 'friend-card';
+        friendCard.setAttribute('data-friend-id', friendId);
+        friendCard.style.opacity = '0';
+        friendCard.style.transform = 'translateY(-10px)';
+        friendCard.innerHTML = `
+            <div class="friend-info" onclick="openMessageModal('${friendId}', '${escapeHtml(friendName)}')" style="cursor: pointer;">
+                <div class="friend-avatar">${initials}</div>
+                <div class="friend-details">
+                    <div class="friend-name">${escapeHtml(friendName)}</div>
+                    <div class="friend-status">
+                        <span class="status-indicator offline"></span>
+                        Offline
+                    </div>
+                </div>
+            </div>
+            <div class="friend-actions">
+                <button class="btn btn-primary btn-small" onclick="openMessageModal('${friendId}', '${escapeHtml(friendName)}')">Message</button>
+            </div>
+        `;
+        
+        if (friendsList.querySelector('.empty-state')) {
+            friendsList.innerHTML = '';
+        }
+        friendsList.insertBefore(friendCard, friendsList.firstChild);
+        
+        // Animate in
+        setTimeout(() => {
+            friendCard.style.transition = 'opacity 0.3s, transform 0.3s';
+            friendCard.style.opacity = '1';
+            friendCard.style.transform = 'translateY(0)';
+        }, 10);
+    }
+    
+    // Add friend to sidebar smoothly
+    function addFriendToSidebar(friendId, friendName) {
+        const sidebarList = document.getElementById('sidebarFriendsList');
+        if (!sidebarList || sidebarList.querySelector(`[data-friend-id="${friendId}"]`)) return;
+        
+        const initials = friendName.substring(0, 2).toUpperCase();
+        const friendItem = document.createElement('div');
+        friendItem.className = 'dashboard-friend-item';
+        friendItem.setAttribute('data-friend-id', friendId);
+        friendItem.style.opacity = '0';
+        friendItem.style.transform = 'translateX(-10px)';
+        friendItem.onclick = () => openMessageModal(friendId, friendName);
+        friendItem.innerHTML = `
+            <div class="dashboard-friend-avatar">${initials}</div>
+            <div class="dashboard-friend-info">
+                <div class="dashboard-friend-name">${escapeHtml(friendName)}</div>
+                <div class="dashboard-friend-status">
+                    <span class="dashboard-status-indicator offline"></span>
+                    Offline
+                </div>
+            </div>
+        `;
+        
+        if (sidebarList.querySelector('.empty-state')) {
+            sidebarList.innerHTML = '';
+        }
+        sidebarList.insertBefore(friendItem, sidebarList.firstChild);
+        
+        // Animate in
+        setTimeout(() => {
+            friendItem.style.transition = 'opacity 0.3s, transform 0.3s';
+            friendItem.style.opacity = '1';
+            friendItem.style.transform = 'translateX(0)';
+        }, 10);
+    }
     
     // Open message modal
     window.openMessageModal = async (friendId, friendName) => {
