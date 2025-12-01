@@ -3120,7 +3120,8 @@ function initializeApp() {
                 await updateFriendRequestsBadge();
             } else {
                 // Get the request
-                let { data: request, error: fetchError } = await supabase
+                let request;
+                const { data: requestData, error: fetchError } = await supabase
                     .from('friend_requests')
                     .select('*, sender:profiles!friend_requests_sender_id_fkey(id, name, username), receiver:profiles!friend_requests_receiver_id_fkey(id, name, username)')
                     .eq('id', requestId)
@@ -3157,6 +3158,13 @@ function initializeApp() {
                         sender: profileMap[simpleRequest.sender_id],
                         receiver: profileMap[simpleRequest.receiver_id]
                     };
+                } else {
+                    request = requestData;
+                }
+                
+                // Ensure request exists
+                if (!request) {
+                    throw new Error('Request not found');
                 }
                 
                 if (action === 'accept') {
