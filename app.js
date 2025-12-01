@@ -1675,9 +1675,20 @@ function initializeApp() {
                                                 `;
                                             }).join('')}
                                         </div>
-                                        <div class="add-comment">
-                                            <input type="text" placeholder="Add a comment..." id="comment-${entry.id}">
-                                            <button class="btn btn-primary btn-small" onclick="addComment('${entry.id}')">Post</button>
+                                        <div class="add-comment" style="display: flex; gap: 10px; align-items: center; margin-top: 12px;">
+                                            <input
+                                                type="text"
+                                                placeholder="Add a comment..."
+                                                id="comment-${entry.id}"
+                                                style="flex: 1; min-width: 0;"
+                                            >
+                                            <button
+                                                class="btn btn-primary btn-small"
+                                                style="white-space: nowrap; flex-shrink: 0;"
+                                                onclick="addComment('${entry.id}')"
+                                            >
+                                                Post
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
@@ -2647,6 +2658,12 @@ function initializeApp() {
     const dashboardToggleBtn = document.getElementById('dashboardToggleBtn');
     const dashboardSidebar = document.querySelector('.dashboard-sidebar');
     const dashboardOverlay = document.getElementById('dashboardOverlay');
+
+    // Ensure dashboard sidebar is vertically scrollable when content overflows
+    if (dashboardSidebar) {
+        dashboardSidebar.style.overflowY = 'auto';
+        dashboardSidebar.style.webkitOverflowScrolling = 'touch'; // smooth scrolling on mobile
+    }
     
     function toggleDashboard() {
         if (dashboardSidebar && dashboardOverlay) {
