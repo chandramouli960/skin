@@ -26,6 +26,12 @@ body {
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+}
+
+#mainApp {
+    background: var(--bg);
+    min-height: 100vh;
 }
 
 /* Authentication Modal */
@@ -89,6 +95,7 @@ body {
 #mainApp {
     min-height: 100vh;
     padding-bottom: 80px; /* Space for bottom nav */
+    background: var(--bg);
 }
 
 .app-header {
@@ -1120,6 +1127,12 @@ body {
     z-index: 50;
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
     overflow: hidden;
+}
+
+.dashboard-content {
+    background: var(--card-bg);
+    flex: 1;
+    overflow-y: auto;
 }
 
 .dashboard-header {
