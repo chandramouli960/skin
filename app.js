@@ -4,10 +4,13 @@ let currentUser = null;
 let userGroups = [];
 let userGoals = [];
 let currentViewingGoalId = null; // Store goalId for comment reload
+let currentViewingGroupId = null; // Store groupId for filtering goals
 let groupsCache = null;
 let goalsCache = null;
 let cacheTimestamp = null;
 const CACHE_DURATION = 30000; // 30 seconds
+let currentGroupChatId = null; // Store groupId for group chat
+let groupChatPollInterval = null; // Polling interval for group chat
 
 // Initialize Supabase when ready
 function initSupabase() {
@@ -159,12 +162,21 @@ function initializeApp() {
         
         // Load data for the tab
         if (tabId === 'groupsTab') {
+            currentViewingGroupId = null; // Clear group filter when switching to groups tab
             loadGroups();
         } else if (tabId === 'goalsTab') {
-            loadGoals();
+            // If no group is selected, clear the filter
+            if (!currentViewingGroupId) {
+                loadGoals();
+            } else {
+                // Keep the group filter active
+                loadGoals(true);
+            }
         } else if (tabId === 'progressTab') {
+            currentViewingGroupId = null; // Clear group filter
             loadProgress();
         } else if (tabId === 'friendsTab') {
+            currentViewingGroupId = null; // Clear group filter
             loadFriends();
             // Also refresh sidebar friends
             if (typeof loadSidebarFriends === 'function') {
@@ -589,11 +601,19 @@ function initializeApp() {
                             <div class="card-title">${escapeHtml(group.name)}</div>
                             <div class="card-subtitle">Code: ${escapeHtml(group.code)}</div>
                         </div>
-                        ${!isOwner ? `<button class="btn btn-danger btn-small" onclick="leaveGroup('${group.id}')" title="Leave Group">Leave</button>` : ''}
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-primary btn-small" onclick="openGroupChat('${group.id}', '${escapeHtml(group.name)}')" title="Group Chat">💬</button>
+                            <button class="btn btn-secondary btn-small" onclick="openGroupAnalytics('${group.id}', '${escapeHtml(group.name)}')" title="Analytics">📊</button>
+                            ${!isOwner ? `<button class="btn btn-danger btn-small" onclick="leaveGroup('${group.id}')" title="Leave Group">Leave</button>` : ''}
+                        </div>
                     </div>
                     <div class="card-content" onclick="viewGroup('${group.id}')" style="cursor: pointer;">${escapeHtml(group.description || 'No description')}</div>
-                    <div class="card-footer">
+                    <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>Created ${formatDate(group.created_at)}</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-primary btn-small" onclick="event.stopPropagation(); openGroupChat('${group.id}', '${escapeHtml(group.name)}')" style="font-size: 0.8rem;">Chat</button>
+                            <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); openGroupAnalytics('${group.id}', '${escapeHtml(group.name)}')" style="font-size: 0.8rem;">Analytics</button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -800,7 +820,10 @@ function initializeApp() {
     };
 
     function viewGroup(groupId) {
+        currentViewingGroupId = groupId;
         switchTab('goalsTab');
+        // Load goals filtered by this group
+        loadGoals(true);
     }
 
     // ========== GOALS ==========
@@ -836,7 +859,10 @@ function initializeApp() {
                 .eq('is_active', true)
                 .order('created_at', { ascending: false });
             
-            if (groupIds.length > 0) {
+            // If viewing a specific group, filter by that group
+            if (currentViewingGroupId) {
+                query = query.eq('group_id', currentViewingGroupId);
+            } else if (groupIds.length > 0) {
                 query = query.or(`user_id.eq.${user.id},group_id.in.(${groupIds.join(',')})`);
             } else {
                 query = query.eq('user_id', user.id);
@@ -862,9 +888,43 @@ function initializeApp() {
     // Display goals with edit/delete functionality
     async function displayGoals(goals) {
         const goalsList = document.getElementById('goalsList');
+        const sectionHeader = document.querySelector('#goalsTab .section-header h2');
+        
+        // Update header if viewing a specific group
+        if (currentViewingGroupId && sectionHeader) {
+            const { data: group } = await supabase
+                .from('groups')
+                .select('name')
+                .eq('id', currentViewingGroupId)
+                .maybeSingle();
+            if (group) {
+                sectionHeader.textContent = `${group.name} Goals`;
+                // Add back button if it doesn't exist
+                const existingBackBtn = document.getElementById('backToAllGoalsBtn');
+                if (!existingBackBtn) {
+                    const backBtn = document.createElement('button');
+                    backBtn.id = 'backToAllGoalsBtn';
+                    backBtn.className = 'btn btn-secondary btn-small';
+                    backBtn.textContent = '← All Goals';
+                    backBtn.onclick = () => {
+                        currentViewingGroupId = null;
+                        loadGoals(true);
+                    };
+                    const header = sectionHeader.parentElement;
+                    header.insertBefore(backBtn, sectionHeader.nextSibling);
+                }
+            }
+        } else if (sectionHeader) {
+            sectionHeader.textContent = 'My Goals';
+            const backBtn = document.getElementById('backToAllGoalsBtn');
+            if (backBtn) backBtn.remove();
+        }
         
         if (goals.length === 0) {
-            goalsList.innerHTML = '<div class="empty-state"><p>🎯 No goals yet.</p><p style="margin-top: 10px; font-size: 0.9rem;">Create your first goal to start tracking your progress!</p></div>';
+            const emptyMsg = currentViewingGroupId 
+                ? '<div class="empty-state"><p>🎯 No goals in this group yet.</p><p style="margin-top: 10px; font-size: 0.9rem;">Create a goal for this group to get started!</p></div>'
+                : '<div class="empty-state"><p>🎯 No goals yet.</p><p style="margin-top: 10px; font-size: 0.9rem;">Create your first goal to start tracking your progress!</p></div>';
+            goalsList.innerHTML = emptyMsg;
             return;
         }
         
@@ -1465,6 +1525,335 @@ function initializeApp() {
     // Make functions global for onclick handlers
     window.viewGroup = viewGroup;
     window.viewGoalDetails = viewGoalDetails;
+    
+    // ========== GROUP CHAT ==========
+    
+    // Open group chat modal
+    window.openGroupChat = async (groupId, groupName) => {
+        currentGroupChatId = groupId;
+        document.getElementById('groupChatTitle').textContent = `${groupName} - Chat`;
+        openModal('groupChatModal');
+        await loadGroupMessages(groupId);
+        
+        // Start polling for new messages
+        if (groupChatPollInterval) {
+            clearInterval(groupChatPollInterval);
+        }
+        groupChatPollInterval = setInterval(() => {
+            if (currentGroupChatId === groupId) {
+                loadGroupMessages(groupId);
+            }
+        }, 3000);
+    };
+    
+    // Load group messages
+    async function loadGroupMessages(groupId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            const { data: messages, error } = await supabase
+                .from('group_messages')
+                .select('*, sender:profiles!group_messages_sender_id_fkey(id, name, username)')
+                .eq('group_id', groupId)
+                .order('created_at', { ascending: true });
+            
+            if (error) throw error;
+            
+            const messagesList = document.getElementById('groupMessagesList');
+            if (!messagesList) return;
+            
+            if (!messages || messages.length === 0) {
+                messagesList.innerHTML = '<div class="empty-state"><p>No messages yet. Start the conversation!</p></div>';
+                return;
+            }
+            
+            messagesList.innerHTML = messages.map(msg => {
+                const isOwn = msg.sender_id === user.id;
+                const senderName = msg.sender?.name || msg.sender?.username || 'Unknown';
+                const time = formatDate(msg.created_at) + ' ' + new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                
+                return `
+                    <div class="message ${isOwn ? 'sent' : 'received'}">
+                        ${!isOwn ? `<div class="message-sender">${escapeHtml(senderName)}</div>` : ''}
+                        <div class="message-bubble">${escapeHtml(msg.content)}</div>
+                        <div class="message-time">${time}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            messagesList.scrollTop = messagesList.scrollHeight;
+        } catch (error) {
+            console.error('Error loading group messages:', error);
+            const messagesList = document.getElementById('groupMessagesList');
+            if (messagesList) {
+                messagesList.innerHTML = '<div class="empty-state" style="color: var(--error);"><p>Error loading messages</p></div>';
+            }
+        }
+    }
+    
+    // Send group message
+    document.getElementById('sendGroupMessageBtn')?.addEventListener('click', async () => {
+        await sendGroupMessage();
+    });
+    
+    document.getElementById('groupMessageInput')?.addEventListener('keypress', async (e) => {
+        if (e.key === 'Enter') {
+            await sendGroupMessage();
+        }
+    });
+    
+    async function sendGroupMessage() {
+        if (!currentGroupChatId) return;
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        const input = document.getElementById('groupMessageInput');
+        if (!input) return;
+        const content = input.value.trim();
+        
+        if (!content) return;
+        
+        const sendBtn = document.getElementById('sendGroupMessageBtn');
+        if (!sendBtn) return;
+        const messagesList = document.getElementById('groupMessagesList');
+        if (!messagesList) return;
+        
+        // Optimistically add message
+        const tempId = 'temp_' + Date.now();
+        const time = formatDate(new Date().toISOString()) + ' ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message sent';
+        messageDiv.setAttribute('data-message-id', tempId);
+        messageDiv.style.opacity = '0.7';
+        messageDiv.innerHTML = `
+            <div class="message-bubble">${escapeHtml(content)}</div>
+            <div class="message-time">${time}</div>
+        `;
+        messagesList.appendChild(messageDiv);
+        messagesList.scrollTop = messagesList.scrollHeight;
+        
+        input.value = '';
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Sending...';
+        
+        try {
+            const { data: newMessage, error } = await supabase
+                .from('group_messages')
+                .insert([{
+                    group_id: currentGroupChatId,
+                    sender_id: user.id,
+                    content: content
+                }])
+                .select()
+                .maybeSingle();
+            
+            if (error || !newMessage) {
+                throw error || new Error('Failed to send message');
+            }
+            
+            // Update with real message ID
+            messageDiv.setAttribute('data-message-id', newMessage.id);
+            messageDiv.style.opacity = '1';
+            messageDiv.style.transition = 'opacity 0.3s';
+        } catch (error) {
+            console.error('Error sending group message:', error);
+            messageDiv.remove();
+            showStatus(getErrorMessage(error), 'error');
+            input.value = content;
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+        }
+    }
+    
+    // Cleanup group chat polling when modal closes
+    document.getElementById('groupChatModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'groupChatModal' || e.target.classList.contains('modal-close')) {
+            if (groupChatPollInterval) {
+                clearInterval(groupChatPollInterval);
+                groupChatPollInterval = null;
+            }
+            currentGroupChatId = null;
+        }
+    });
+    
+    // ========== GROUP ANALYTICS ==========
+    
+    // Open group analytics modal
+    window.openGroupAnalytics = async (groupId, groupName) => {
+        document.getElementById('groupAnalyticsTitle').textContent = `${groupName} - Analytics`;
+        openModal('groupAnalyticsModal');
+        await loadGroupAnalytics(groupId);
+    };
+    
+    // Load group analytics
+    async function loadGroupAnalytics(groupId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        const analyticsContent = document.getElementById('groupAnalyticsContent');
+        if (!analyticsContent) return;
+        
+        analyticsContent.innerHTML = '<p class="loading">Loading analytics...</p>';
+        
+        try {
+            // Get all group members
+            const { data: members } = await supabase
+                .from('group_members')
+                .select('user_id, profiles(id, name, username)')
+                .eq('group_id', groupId);
+            
+            if (!members || members.length === 0) {
+                analyticsContent.innerHTML = '<div class="empty-state"><p>No members in this group</p></div>';
+                return;
+            }
+            
+            const memberIds = members.map(m => m.user_id);
+            
+            // Get all goals for this group
+            const { data: goals } = await supabase
+                .from('goals')
+                .select('*')
+                .eq('group_id', groupId)
+                .eq('is_active', true);
+            
+            if (!goals || goals.length === 0) {
+                analyticsContent.innerHTML = '<div class="empty-state"><p>No goals in this group yet</p></div>';
+                return;
+            }
+            
+            const goalIds = goals.map(g => g.id);
+            
+            // Get all progress entries for these goals
+            const { data: progressEntries } = await supabase
+                .from('progress_entries')
+                .select('*, goals(title, target_days)')
+                .in('goal_id', goalIds);
+            
+            // Calculate analytics per user
+            const userStats = {};
+            
+            memberIds.forEach(memberId => {
+                const member = members.find(m => m.user_id === memberId);
+                const memberName = member?.profiles?.name || member?.profiles?.username || 'Unknown';
+                userStats[memberId] = {
+                    name: memberName,
+                    totalGoals: goals.length,
+                    goalsWithProgress: new Set(),
+                    totalProgressEntries: 0,
+                    progressByGoal: {},
+                    completionRate: 0
+                };
+            });
+            
+            if (progressEntries) {
+                progressEntries.forEach(entry => {
+                    const userId = entry.user_id;
+                    const goalId = entry.goal_id;
+                    const goal = entry.goals;
+                    
+                    if (userStats[userId]) {
+                        userStats[userId].goalsWithProgress.add(goalId);
+                        userStats[userId].totalProgressEntries++;
+                        
+                        if (!userStats[userId].progressByGoal[goalId]) {
+                            userStats[userId].progressByGoal[goalId] = {
+                                title: goal?.title || 'Unknown',
+                                targetDays: goal?.target_days || 30,
+                                entries: 0
+                            };
+                        }
+                        userStats[userId].progressByGoal[goalId].entries++;
+                    }
+                });
+            }
+            
+            // Calculate completion rates
+            Object.keys(userStats).forEach(userId => {
+                const stats = userStats[userId];
+                let totalCompletion = 0;
+                Object.values(stats.progressByGoal).forEach(goalProgress => {
+                    const completion = Math.min(100, (goalProgress.entries / goalProgress.targetDays) * 100);
+                    totalCompletion += completion;
+                });
+                stats.completionRate = stats.totalGoals > 0 ? (totalCompletion / stats.totalGoals) : 0;
+            });
+            
+            // Render analytics
+            const statsArray = Object.values(userStats).sort((a, b) => b.totalProgressEntries - a.totalProgressEntries);
+            
+            analyticsContent.innerHTML = `
+                <div style="margin-bottom: 30px;">
+                    <h4 style="margin-bottom: 15px; color: var(--primary);">Group Overview</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <div class="card" style="padding: 15px;">
+                            <div style="font-size: 0.9rem; color: var(--text-light); margin-bottom: 5px;">Total Members</div>
+                            <div style="font-size: 1.8rem; font-weight: bold; color: var(--primary);">${memberIds.length}</div>
+                        </div>
+                        <div class="card" style="padding: 15px;">
+                            <div style="font-size: 0.9rem; color: var(--text-light); margin-bottom: 5px;">Total Goals</div>
+                            <div style="font-size: 1.8rem; font-weight: bold; color: var(--primary);">${goals.length}</div>
+                        </div>
+                        <div class="card" style="padding: 15px;">
+                            <div style="font-size: 0.9rem; color: var(--text-light); margin-bottom: 5px;">Total Progress Entries</div>
+                            <div style="font-size: 1.8rem; font-weight: bold; color: var(--primary);">${progressEntries?.length || 0}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 style="margin-bottom: 15px; color: var(--primary);">Member Progress</h4>
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        ${statsArray.map(stats => `
+                            <div class="card" style="padding: 20px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                    <h5 style="margin: 0; color: var(--text);">${escapeHtml(stats.name)}</h5>
+                                    <div style="font-size: 1.2rem; font-weight: bold; color: var(--primary);">${stats.totalProgressEntries} entries</div>
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                        <span style="font-size: 0.9rem; color: var(--text-light);">Overall Completion</span>
+                                        <span style="font-size: 0.9rem; font-weight: bold;">${stats.completionRate.toFixed(1)}%</span>
+                                    </div>
+                                    <div style="width: 100%; height: 8px; background: var(--secondary); border-radius: 4px; overflow: hidden;">
+                                        <div style="width: ${stats.completionRate}%; height: 100%; background: var(--primary); transition: width 0.3s;"></div>
+                                    </div>
+                                </div>
+                                <div style="font-size: 0.85rem; color: var(--text-light);">
+                                    Active in ${stats.goalsWithProgress.size} of ${stats.totalGoals} goals
+                                </div>
+                                ${Object.keys(stats.progressByGoal).length > 0 ? `
+                                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
+                                        <div style="font-size: 0.9rem; font-weight: bold; margin-bottom: 10px; color: var(--text);">Goal Breakdown:</div>
+                                        ${Object.values(stats.progressByGoal).map(goalProgress => {
+                                            const goalCompletion = Math.min(100, (goalProgress.entries / goalProgress.targetDays) * 100);
+                                            return `
+                                                <div style="margin-bottom: 10px;">
+                                                    <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                                                        <span style="font-size: 0.85rem;">${escapeHtml(goalProgress.title)}</span>
+                                                        <span style="font-size: 0.85rem; font-weight: bold;">${goalProgress.entries}/${goalProgress.targetDays}</span>
+                                                    </div>
+                                                    <div style="width: 100%; height: 6px; background: var(--secondary); border-radius: 3px; overflow: hidden;">
+                                                        <div style="width: ${goalCompletion}%; height: 100%; background: var(--success); transition: width 0.3s;"></div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            console.error('Error loading group analytics:', error);
+            analyticsContent.innerHTML = `<div class="empty-state" style="color: var(--error);"><p>Error loading analytics</p><p style="font-size: 0.9rem; margin-top: 10px;">${getErrorMessage(error)}</p></div>`;
+        }
+    }
+    
     window.openLogProgress = (goalId) => {
         document.getElementById('progressGoalId').value = goalId;
         const today = new Date();
