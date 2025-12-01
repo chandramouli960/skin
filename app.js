@@ -67,6 +67,15 @@ function initializeApp() {
             modal.classList.remove('active');
             document.body.style.overflow = ''; // Restore scroll
             
+            // Handle message modal cleanup
+            if (modalId === 'messageModal') {
+                currentMessagingFriendId = null;
+                if (messagePollInterval) {
+                    clearInterval(messagePollInterval);
+                    messagePollInterval = null;
+                }
+            }
+            
             // Reset any forms in the modal
             const forms = modal.querySelectorAll('form');
             forms.forEach(form => {
@@ -151,6 +160,8 @@ function initializeApp() {
             loadGoals();
         } else if (tabId === 'progressTab') {
             loadProgress();
+        } else if (tabId === 'friendsTab') {
+            loadFriends();
         }
     }
 
@@ -200,6 +211,22 @@ function initializeApp() {
         document.getElementById('mainApp').style.display = 'block';
         document.getElementById('userName').textContent = user.user_metadata?.name || user.email;
         loadGroups();
+        updateLastSeen();
+        // Update last seen every 30 seconds
+        setInterval(updateLastSeen, 30000);
+    }
+    
+    // Update last seen timestamp
+    async function updateLastSeen() {
+        if (!currentUser) return;
+        try {
+            await supabase
+                .from('profiles')
+                .update({ last_seen: new Date().toISOString() })
+                .eq('id', currentUser.id);
+        } catch (error) {
+            console.error('Error updating last seen:', error);
+        }
     }
 
     // Switch between login and register forms
@@ -1753,5 +1780,487 @@ function initializeApp() {
         today.setHours(0, 0, 0, 0);
         progressDate.valueAsDate = today;
         progressDate.max = new Date().toISOString().split('T')[0]; // Prevent future dates
+    }
+
+    // ========== FRIENDS ==========
+    
+    let currentMessagingFriendId = null;
+    let messagePollInterval = null;
+    
+    // Load friends list
+    async function loadFriends() {
+        const friendsList = document.getElementById('friendsList');
+        if (!friendsList) return;
+        showLoading('friendsList', 'Loading friends...');
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            
+            // Get all friendships where user is involved
+            const { data: friendships, error } = await supabase
+                .from('friendships')
+                .select('*')
+                .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`);
+            
+            if (error) throw error;
+            
+            if (!friendships || friendships.length === 0) {
+                friendsList.innerHTML = '<div class="empty-state"><p>👥 No friends yet.</p><p style="margin-top: 10px; font-size: 0.9rem;">Add friends to start messaging!</p></div>';
+                return;
+            }
+            
+            // Get friend user IDs
+            const friendIds = friendships.map(f => 
+                f.user1_id === user.id ? f.user2_id : f.user1_id
+            );
+            
+            // Get friend profiles
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, name, username, last_seen')
+                .in('id', friendIds);
+            
+            // Check for unread messages
+            const { data: unreadMessages } = await supabase
+                .from('messages')
+                .select('sender_id, receiver_id')
+                .eq('receiver_id', user.id)
+                .eq('is_read', false);
+            
+            const unreadCounts = {};
+            if (unreadMessages) {
+                unreadMessages.forEach(msg => {
+                    unreadCounts[msg.sender_id] = (unreadCounts[msg.sender_id] || 0) + 1;
+                });
+            }
+            
+            // Determine online status (online if last_seen within last 5 minutes)
+            const now = new Date();
+            const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+            
+            friendsList.innerHTML = profiles.map(profile => {
+                const lastSeen = new Date(profile.last_seen);
+                const isOnline = lastSeen > fiveMinutesAgo;
+                const unreadCount = unreadCounts[profile.id] || 0;
+                const displayName = profile.name || profile.username || 'Unknown';
+                const initials = displayName.substring(0, 2).toUpperCase();
+                
+                return `
+                    <div class="friend-card">
+                        <div class="friend-info" onclick="openMessageModal('${profile.id}', '${escapeHtml(displayName)}')" style="cursor: pointer;">
+                            <div class="friend-avatar">${initials}</div>
+                            <div class="friend-details">
+                                <div class="friend-name">${escapeHtml(displayName)}</div>
+                                <div class="friend-status">
+                                    <span class="status-indicator ${isOnline ? 'online' : 'offline'}"></span>
+                                    ${isOnline ? 'Online' : `Last seen ${formatRelativeTime(lastSeen)}`}
+                                    ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="friend-actions">
+                            <button class="btn btn-primary btn-small" onclick="openMessageModal('${profile.id}', '${escapeHtml(displayName)}')">Message</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('Error loading friends:', error);
+            friendsList.innerHTML = `<div class="empty-state" style="color: var(--error);"><p>❌ Error loading friends</p><p style="font-size: 0.9rem; margin-top: 10px;">${getErrorMessage(error)}</p></div>`;
+        }
+    }
+    
+    // Format relative time
+    function formatRelativeTime(date) {
+        const now = new Date();
+        const diff = now - date;
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+        
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+        return formatDate(date);
+    }
+    
+    // Add friend button
+    document.getElementById('addFriendBtn')?.addEventListener('click', () => {
+        openModal('addFriendModal');
+    });
+    
+    // Friend requests button
+    document.getElementById('friendRequestsBtn')?.addEventListener('click', async () => {
+        openModal('friendRequestsModal');
+        await loadFriendRequests();
+    });
+    
+    // Send friend request
+    document.getElementById('addFriendForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            showStatus('Please log in', 'error');
+            return;
+        }
+        
+        const username = document.getElementById('friendUsername').value.trim();
+        
+        if (!username) {
+            showStatus('Please enter a username', 'error');
+            return;
+        }
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Sending...';
+        
+        try {
+            // Find user by username
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('username', username)
+                .single();
+            
+            if (profileError || !profile) {
+                showStatus('User not found', 'error');
+                return;
+            }
+            
+            if (profile.id === user.id) {
+                showStatus('You cannot add yourself as a friend', 'error');
+                return;
+            }
+            
+            // Check if already friends
+            const { data: existingFriendship } = await supabase
+                .from('friendships')
+                .select('*')
+                .or(`and(user1_id.eq.${user.id},user2_id.eq.${profile.id}),and(user1_id.eq.${profile.id},user2_id.eq.${user.id})`)
+                .single();
+            
+            if (existingFriendship) {
+                showStatus('You are already friends with this user', 'error');
+                return;
+            }
+            
+            // Check if request already exists
+            const { data: existingRequest } = await supabase
+                .from('friend_requests')
+                .select('*')
+                .or(`and(sender_id.eq.${user.id},receiver_id.eq.${profile.id}),and(sender_id.eq.${profile.id},receiver_id.eq.${user.id})`)
+                .eq('status', 'pending')
+                .single();
+            
+            if (existingRequest) {
+                showStatus('Friend request already exists', 'error');
+                return;
+            }
+            
+            // Create friend request
+            const { error } = await supabase
+                .from('friend_requests')
+                .insert([{
+                    sender_id: user.id,
+                    receiver_id: profile.id,
+                    status: 'pending'
+                }]);
+            
+            if (error) throw error;
+            
+            showStatus('Friend request sent!', 'success');
+            closeModal('addFriendModal');
+            document.getElementById('addFriendForm').reset();
+        } catch (error) {
+            console.error('Error sending friend request:', error);
+            showStatus(getErrorMessage(error), 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Send Friend Request';
+        }
+    });
+    
+    // Load friend requests
+    async function loadFriendRequests() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            const { data: requests, error } = await supabase
+                .from('friend_requests')
+                .select('*')
+                .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false });
+            
+            if (error) throw error;
+            
+            const requestsList = document.getElementById('friendRequestsList');
+            if (!requestsList) return;
+            
+            if (!requests || requests.length === 0) {
+                requestsList.innerHTML = '<div class="empty-state"><p>No pending friend requests</p></div>';
+                return;
+            }
+            
+            // Get user IDs
+            const userIds = [...new Set(requests.flatMap(r => [r.sender_id, r.receiver_id]))];
+            
+            // Get profiles
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, name, username')
+                .in('id', userIds);
+            
+            const profileMap = {};
+            if (profiles) {
+                profiles.forEach(p => {
+                    profileMap[p.id] = p;
+                });
+            }
+            
+            requestsList.innerHTML = requests.map(request => {
+                const isReceiver = request.receiver_id === user.id;
+                const otherUserId = isReceiver ? request.sender_id : request.receiver_id;
+                const otherUser = profileMap[otherUserId];
+                const displayName = otherUser?.name || otherUser?.username || 'Unknown';
+                
+                if (isReceiver) {
+                    // Incoming request
+                    return `
+                        <div class="friend-request-card">
+                            <div class="friend-request-info">
+                                <div class="friend-request-name">${escapeHtml(displayName)}</div>
+                                <div class="friend-request-date">Sent ${formatRelativeTime(new Date(request.created_at))}</div>
+                            </div>
+                            <div class="friend-request-actions">
+                                <button class="btn btn-primary btn-small" onclick="handleFriendRequest('${request.id}', 'accept')">Accept</button>
+                                <button class="btn btn-secondary btn-small" onclick="handleFriendRequest('${request.id}', 'reject')">Reject</button>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Outgoing request
+                    return `
+                        <div class="friend-request-card">
+                            <div class="friend-request-info">
+                                <div class="friend-request-name">${escapeHtml(displayName)}</div>
+                                <div class="friend-request-date">Sent ${formatRelativeTime(new Date(request.created_at))}</div>
+                            </div>
+                            <div class="friend-request-actions">
+                                <span style="color: var(--text-light); font-size: 0.9rem;">Pending</span>
+                                <button class="btn btn-secondary btn-small" onclick="handleFriendRequest('${request.id}', 'cancel')">Cancel</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            }).join('');
+        } catch (error) {
+            console.error('Error loading friend requests:', error);
+            const requestsList = document.getElementById('friendRequestsList');
+            if (requestsList) {
+                requestsList.innerHTML = `<div class="empty-state" style="color: var(--error);"><p>Error loading requests</p></div>`;
+            }
+        }
+    }
+    
+    // Handle friend request (accept/reject/cancel)
+    window.handleFriendRequest = async (requestId, action) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            if (action === 'cancel') {
+                // Delete the request
+                const { error } = await supabase
+                    .from('friend_requests')
+                    .delete()
+                    .eq('id', requestId)
+                    .eq('sender_id', user.id);
+                
+                if (error) throw error;
+                showStatus('Friend request cancelled', 'success');
+            } else {
+                // Get the request
+                const { data: request, error: fetchError } = await supabase
+                    .from('friend_requests')
+                    .select('*')
+                    .eq('id', requestId)
+                    .single();
+                
+                if (fetchError) throw fetchError;
+                
+                if (action === 'accept') {
+                    // Update request status
+                    const { error: updateError } = await supabase
+                        .from('friend_requests')
+                        .update({ status: 'accepted' })
+                        .eq('id', requestId);
+                    
+                    if (updateError) throw updateError;
+                    
+                    // Create friendship
+                    const user1Id = request.sender_id < request.receiver_id ? request.sender_id : request.receiver_id;
+                    const user2Id = request.sender_id < request.receiver_id ? request.receiver_id : request.sender_id;
+                    
+                    const { error: friendError } = await supabase
+                        .from('friendships')
+                        .insert([{
+                            user1_id: user1Id,
+                            user2_id: user2Id
+                        }]);
+                    
+                    if (friendError) throw friendError;
+                    
+                    showStatus('Friend request accepted!', 'success');
+                } else if (action === 'reject') {
+                    const { error } = await supabase
+                        .from('friend_requests')
+                        .update({ status: 'rejected' })
+                        .eq('id', requestId);
+                    
+                    if (error) throw error;
+                    showStatus('Friend request rejected', 'success');
+                }
+            }
+            
+            await loadFriendRequests();
+            await loadFriends();
+        } catch (error) {
+            console.error('Error handling friend request:', error);
+            showStatus(getErrorMessage(error), 'error');
+        }
+    };
+    
+    // Open message modal
+    window.openMessageModal = async (friendId, friendName) => {
+        currentMessagingFriendId = friendId;
+        document.getElementById('messageModalTitle').textContent = `Messages with ${friendName}`;
+        openModal('messageModal');
+        await loadMessages(friendId);
+        
+        // Start polling for new messages
+        if (messagePollInterval) {
+            clearInterval(messagePollInterval);
+        }
+        messagePollInterval = setInterval(() => {
+            if (currentMessagingFriendId === friendId) {
+                loadMessages(friendId);
+            }
+        }, 3000); // Poll every 3 seconds
+    };
+    
+    // Load messages
+    async function loadMessages(friendId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            // Get messages
+            const { data: messages, error } = await supabase
+                .from('messages')
+                .select('*')
+                .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
+                .order('created_at', { ascending: true })
+                .limit(50);
+            
+            if (error) throw error;
+            
+            // Mark messages as read
+            await supabase
+                .from('messages')
+                .update({ is_read: true })
+                .eq('receiver_id', user.id)
+                .eq('sender_id', friendId)
+                .eq('is_read', false);
+            
+            const messagesList = document.getElementById('messagesList');
+            if (!messagesList) return;
+            
+            if (!messages || messages.length === 0) {
+                messagesList.innerHTML = '<div class="empty-state"><p>No messages yet. Start the conversation!</p></div>';
+                return;
+            }
+            
+            messagesList.innerHTML = messages.map(msg => {
+                const isSent = msg.sender_id === user.id;
+                const time = formatDate(msg.created_at) + ' ' + new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                
+                return `
+                    <div class="message ${isSent ? 'sent' : 'received'}">
+                        <div class="message-bubble">${escapeHtml(msg.content)}</div>
+                        <div class="message-time">${time}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            // Scroll to bottom
+            messagesList.scrollTop = messagesList.scrollHeight;
+            
+            // Reload friends to update unread counts
+            if (document.getElementById('friendsTab')?.classList.contains('active')) {
+                loadFriends();
+            }
+        } catch (error) {
+            console.error('Error loading messages:', error);
+            const messagesList = document.getElementById('messagesList');
+            if (messagesList) {
+                messagesList.innerHTML = '<div class="empty-state" style="color: var(--error);"><p>Error loading messages</p></div>';
+            }
+        }
+    }
+    
+    // Send message
+    document.getElementById('sendMessageBtn')?.addEventListener('click', async () => {
+        await sendMessage();
+    });
+    
+    document.getElementById('messageInput')?.addEventListener('keypress', async (e) => {
+        if (e.key === 'Enter') {
+            await sendMessage();
+        }
+    });
+    
+    async function sendMessage() {
+        if (!currentMessagingFriendId) return;
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        const input = document.getElementById('messageInput');
+        if (!input) return;
+        const content = input.value.trim();
+        
+        if (!content) return;
+        
+        const sendBtn = document.getElementById('sendMessageBtn');
+        if (!sendBtn) return;
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Sending...';
+        
+        try {
+            const { error } = await supabase
+                .from('messages')
+                .insert([{
+                    sender_id: user.id,
+                    receiver_id: currentMessagingFriendId,
+                    content: content
+                }]);
+            
+            if (error) throw error;
+            
+            input.value = '';
+            await loadMessages(currentMessagingFriendId);
+        } catch (error) {
+            console.error('Error sending message:', error);
+            showStatus(getErrorMessage(error), 'error');
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+        }
     }
 }
