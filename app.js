@@ -231,7 +231,7 @@ function initializeApp() {
     function showMainApp(user) {
         document.getElementById('authModal').style.display = 'none';
         document.getElementById('mainApp').style.display = 'block';
-        document.getElementById('userName').textContent = user.user_metadata?.name || user.email;
+        updateUserHeader(user);
         loadGroups();
         updateLastSeen();
         // Update last seen every 30 seconds
@@ -241,6 +241,59 @@ function initializeApp() {
             loadSidebarFriends();
             updateFriendRequestsBadge();
         }, 500);
+    }
+
+    // Generate a stable 4-digit discriminator from a UUID (like Discord)
+    function getUserDiscriminator(id) {
+        if (!id) return '0000';
+        const clean = String(id).replace(/-/g, '');
+        let sum = 0;
+        for (let i = 0; i < clean.length; i++) {
+            sum = (sum + clean.charCodeAt(i)) % 100000; // keep number small
+        }
+        const code = (sum % 10000).toString().padStart(4, '0');
+        return code;
+    }
+
+    // Format a Discord-style handle: username#1234
+    function formatUserHandle(profile) {
+        if (!profile) return '';
+        const base =
+            profile.username ||
+            profile.email?.split('@')[0] ||
+            profile.name ||
+            'user';
+        const disc = getUserDiscriminator(profile.id);
+        return `${base}#${disc}`;
+    }
+
+    // Update header with display name and friend tag
+    async function updateUserHeader(user) {
+        const userNameEl = document.getElementById('userName');
+        if (!userNameEl) return;
+
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('id, name, username, email')
+                .eq('id', user.id)
+                .maybeSingle();
+
+            const displayName =
+                profile?.name ||
+                profile?.username ||
+                user.user_metadata?.name ||
+                user.email;
+
+            const handle = profile ? formatUserHandle(profile) : '';
+
+            userNameEl.textContent = handle
+                ? `${displayName} (${handle})`
+                : displayName;
+        } catch (error) {
+            console.error('Error loading profile for header:', error);
+            userNameEl.textContent = user.user_metadata?.name || user.email;
+        }
     }
     
     // Update last seen timestamp
@@ -2876,10 +2929,10 @@ function initializeApp() {
             return;
         }
         
-        const username = document.getElementById('friendUsername').value.trim();
+        const inputValue = document.getElementById('friendUsername').value.trim();
         
-        if (!username) {
-            showStatus('Please enter a username', 'error');
+        if (!inputValue) {
+            showStatus('Please enter a friend tag (username#1234)', 'error');
             return;
         }
         
@@ -2888,58 +2941,77 @@ function initializeApp() {
         submitBtn.textContent = 'Sending...';
         
         try {
-            // Find user by identifier: username, email, or display name (case-insensitive)
-            const identifier = username.trim();
-            
-            if (!identifier) {
-                showStatus('Please enter a name, username, or email', 'error');
-                return;
-            }
-
             let profile = null;
 
-            // 1) Try username exact match (matches Supabase REST call: username=eq.<value>)
-            {
-                const { data, error } = await supabase
+            // Support Discord-style friend tags: username#1234
+            const tagMatch = inputValue.match(/^(.+?)#(\d{4})$/);
+            if (tagMatch) {
+                const baseUsername = tagMatch[1].trim();
+                const discriminator = tagMatch[2];
+
+                // Look up all profiles with that username and filter by discriminator
+                const { data: profilesByUsername, error: tagError } = await supabase
                     .from('profiles')
                     .select('id, username, email, name')
-                    .eq('username', identifier)
-                    .maybeSingle();
+                    .eq('username', baseUsername);
 
-                if (error) {
-                    console.error('Error searching by username:', error);
-                } else if (data) {
-                    profile = data;
+                if (tagError) {
+                    console.error('Error searching by friend tag:', tagError);
+                } else if (profilesByUsername && profilesByUsername.length > 0) {
+                    profile = profilesByUsername.find((p) => {
+                        const disc = getUserDiscriminator(p.id);
+                        return disc === discriminator;
+                    }) || null;
                 }
             }
 
-            // 2) If not found, try email exact match
+            // Fallback: support old behavior (username / email / name) if not a tag or not found
             if (!profile) {
-                const { data, error } = await supabase
-                    .from('profiles')
-                    .select('id, username, email, name')
-                    .eq('email', identifier)
-                    .maybeSingle();
+                const identifier = inputValue.trim();
 
-                if (error) {
-                    console.error('Error searching by email:', error);
-                } else if (data) {
-                    profile = data;
+                // 1) Try username exact match (matches Supabase REST call: username=eq.<value>)
+                {
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('id, username, email, name')
+                        .eq('username', identifier)
+                        .maybeSingle();
+
+                    if (error) {
+                        console.error('Error searching by username:', error);
+                    } else if (data) {
+                        profile = data;
+                    }
                 }
-            }
 
-            // 3) If still not found, try display name (case-insensitive, partial)
-            if (!profile) {
-                const { data, error } = await supabase
-                    .from('profiles')
-                    .select('id, username, email, name')
-                    .ilike('name', `%${identifier}%`);
+                // 2) If not found, try email exact match
+                if (!profile) {
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('id, username, email, name')
+                        .eq('email', identifier)
+                        .maybeSingle();
 
-                if (error) {
-                    console.error('Error searching by name:', error);
-                } else if (data && data.length > 0) {
-                    // Pick the first matching profile
-                    profile = data[0];
+                    if (error) {
+                        console.error('Error searching by email:', error);
+                    } else if (data) {
+                        profile = data;
+                    }
+                }
+
+                // 3) If still not found, try display name (case-insensitive, partial)
+                if (!profile) {
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('id, username, email, name')
+                        .ilike('name', `%${identifier}%`);
+
+                    if (error) {
+                        console.error('Error searching by name:', error);
+                    } else if (data && data.length > 0) {
+                        // Pick the first matching profile
+                        profile = data[0];
+                    }
                 }
             }
 
@@ -3456,17 +3528,40 @@ function initializeApp() {
             return;
         }
         
-        // Also check for duplicate by content and recent timestamp (for optimistic messages)
+        // Also check for duplicate by content and temp ID (for optimistic messages)
         const isSent = message.sender_id === user.id;
         if (isSent) {
+            // Check for temp messages with matching content
+            const tempMessages = Array.from(messagesList.querySelectorAll('.message.sent[data-temp-content]'));
+            const matchingTemp = tempMessages.find(el => {
+                const tempContent = el.getAttribute('data-temp-content');
+                return tempContent && tempContent.trim() === message.content.trim();
+            });
+            
+            if (matchingTemp) {
+                // Update the existing optimistic message
+                matchingTemp.setAttribute('data-message-id', message.id);
+                matchingTemp.removeAttribute('data-temp-content');
+                // Update timestamp
+                const newTime = formatDate(message.created_at) + ' ' + new Date(message.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                const timeElement = matchingTemp.querySelector('.message-time');
+                if (timeElement) {
+                    timeElement.textContent = newTime;
+                }
+                return;
+            }
+            
+            // Fallback: check by content in message bubble (for older temp messages without data-temp-content)
             const existingByContent = Array.from(messagesList.querySelectorAll('.message.sent .message-bubble'))
                 .find(el => el.textContent.trim() === message.content.trim());
             if (existingByContent) {
-                // Update the existing optimistic message
                 const optimisticMsg = existingByContent.closest('.message');
-                optimisticMsg.setAttribute('data-message-id', message.id);
-                optimisticMsg.style.opacity = '1';
-                return;
+                // Only update if it's a temp ID
+                if (optimisticMsg.getAttribute('data-message-id')?.startsWith('temp_')) {
+                    optimisticMsg.setAttribute('data-message-id', message.id);
+                    optimisticMsg.style.opacity = '1';
+                    return;
+                }
             }
         }
         
@@ -3678,19 +3773,25 @@ function initializeApp() {
         const messagesList = document.getElementById('messagesList');
         if (!messagesList) return;
         
-        // Optimistically add message to UI
-        const tempId = 'temp_' + Date.now();
+        // Optimistically add message to UI - make it appear INSTANTLY
+        const tempId = 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         const time = formatDate(new Date().toISOString()) + ' ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message sent';
         messageDiv.setAttribute('data-message-id', tempId);
-        messageDiv.style.opacity = '0.7';
+        messageDiv.setAttribute('data-temp-content', content); // Store content for matching
         messageDiv.innerHTML = `
             <div class="message-bubble">${escapeHtml(content)}</div>
             <div class="message-time">${time}</div>
         `;
+        
+        // Append immediately - no animation delay
         messagesList.appendChild(messageDiv);
-        messagesList.scrollTop = messagesList.scrollHeight;
+        
+        // Scroll to bottom immediately - use requestAnimationFrame for smooth scroll
+        requestAnimationFrame(() => {
+            messagesList.scrollTop = messagesList.scrollHeight;
+        });
         
         input.value = '';
         sendBtn.disabled = true;
@@ -3711,10 +3812,15 @@ function initializeApp() {
                 throw error || new Error('Failed to send message');
             }
             
-            // Update with real message ID and full opacity
+            // Update with real message ID - message is already visible
             messageDiv.setAttribute('data-message-id', newMessage.id);
-            messageDiv.style.opacity = '1';
-            messageDiv.style.transition = 'opacity 0.3s';
+            messageDiv.removeAttribute('data-temp-content'); // Remove temp marker
+            // Update timestamp if different
+            const newTime = formatDate(newMessage.created_at) + ' ' + new Date(newMessage.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            const timeElement = messageDiv.querySelector('.message-time');
+            if (timeElement) {
+                timeElement.textContent = newTime;
+            }
             
             // Update last loaded message timestamp to prevent duplicates
             lastLoadedMessageTimestamp = newMessage.created_at;
