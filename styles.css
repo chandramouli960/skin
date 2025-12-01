@@ -764,7 +764,7 @@ body {
     top: 0;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: 56px; /* match mobile sidebar so it doesn't cover bottom nav */
     background: rgba(0, 0, 0, 0.5);
     z-index: 49;
     opacity: 0;
@@ -809,6 +809,9 @@ body {
         transform: translateX(-100%);
         transition: transform 0.3s ease;
         z-index: 100;
+        /* Stop the sidebar from sitting behind the bottom nav; this keeps
+           the Friends section fully visible without needing to scroll. */
+        bottom: 56px; /* approximate bottom nav height */
     }
     
     .dashboard-sidebar.mobile-open {
