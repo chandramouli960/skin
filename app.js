@@ -36,6 +36,10 @@ function initializeApp() {
     // Show status message with better error details
     function showStatus(message, type = 'success', duration = 3000) {
         const statusEl = document.getElementById('statusMessage');
+        if (!statusEl) {
+            console.warn('Status message element not found');
+            return;
+        }
         statusEl.textContent = message;
         statusEl.className = `status-message ${type} show`;
         
@@ -639,7 +643,7 @@ function initializeApp() {
                     .from('groups')
                     .select('id')
                     .eq('code', code)
-                    .single();
+                    .maybeSingle();
                 
                 if (!existing) {
                     isUnique = true;
@@ -721,7 +725,7 @@ function initializeApp() {
                 .from('groups')
                 .select('*')
                 .eq('code', code)
-                .single();
+                .maybeSingle();
             
             if (groupError || !group) {
                 showStatus('Invalid group code. Please check and try again.', 'error');
@@ -734,7 +738,7 @@ function initializeApp() {
                 .select('*')
                 .eq('group_id', group.id)
                 .eq('user_id', user.id)
-                .single();
+                .maybeSingle();
             
             if (existing) {
                 showStatus('You are already a member of this group', 'error');
@@ -1187,22 +1191,24 @@ function initializeApp() {
     // View goal details with stored goalId
     async function viewGoalDetails(goalId) {
         const goal = userGoals.find(g => g.id === goalId);
-        if (!goal) {
+        let goalToShow = goal;
+        
+        if (!goalToShow) {
             // Try to fetch if not in cache
-            const { data: fetchedGoal } = await supabase
+            const { data: fetchedGoal, error: fetchError } = await supabase
                 .from('goals')
                 .select('*')
                 .eq('id', goalId)
-                .single();
+                .maybeSingle();
             
-            if (!fetchedGoal) {
+            if (fetchError || !fetchedGoal) {
                 showStatus('Goal not found', 'error');
                 return;
             }
+            goalToShow = fetchedGoal;
         }
         
         currentViewingGoalId = goalId; // Store for comment reload
-        const goalToShow = goal || await supabase.from('goals').select('*').eq('id', goalId).single().then(r => r.data);
         
         document.getElementById('goalDetailsTitle').textContent = goalToShow.title;
         
@@ -1527,9 +1533,9 @@ function initializeApp() {
             .from('profiles')
             .select('name, username')
             .eq('id', user.id)
-            .single();
+            .maybeSingle();
         
-        const userName = profile?.name || profile?.username || 'You';
+        const userName = profile?.name || profile?.username || user.email?.split('@')[0] || 'You';
         
         // Optimistically add comment to UI
         const tempComment = document.createElement('div');
@@ -1563,9 +1569,11 @@ function initializeApp() {
                     content: content
                 }])
                 .select()
-                .single();
+                .maybeSingle();
             
-            if (error) throw error;
+            if (error || !newComment) {
+                throw error || new Error('Failed to add comment');
+            }
             
             // Update with real comment data
             const realDate = formatDate(newComment.created_at);
@@ -1720,7 +1728,7 @@ function initializeApp() {
                 .eq('goal_id', goalId)
                 .eq('user_id', user.id)
                 .eq('date', date)
-                .single();
+                .maybeSingle();
             
             if (existing) {
                 showStatus('You have already logged progress for this goal on this date. Please select a different date.', 'error');
@@ -2002,9 +2010,14 @@ function initializeApp() {
             const now = new Date();
             const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
             
+            if (!profiles || profiles.length === 0) {
+                friendsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-light); font-size: 0.85rem;">No friends yet</div>';
+                return;
+            }
+            
             friendsList.innerHTML = profiles.map(profile => {
-                const lastSeen = new Date(profile.last_seen);
-                const isOnline = lastSeen > fiveMinutesAgo;
+                const lastSeen = profile.last_seen ? new Date(profile.last_seen) : new Date(0);
+                const isOnline = !isNaN(lastSeen.getTime()) && lastSeen > fiveMinutesAgo;
                 const displayName = profile.name || profile.username || 'Unknown';
                 const initials = displayName.substring(0, 2).toUpperCase();
                 const unreadCount = unreadCounts[profile.id] || 0;
@@ -2198,9 +2211,14 @@ function initializeApp() {
             const now = new Date();
             const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
             
+            if (!profiles || profiles.length === 0) {
+                friendsList.innerHTML = '<div class="empty-state"><p>👥 No friends yet.</p><p style="margin-top: 10px; font-size: 0.9rem;">Add friends to start messaging!</p></div>';
+                return;
+            }
+            
             friendsList.innerHTML = profiles.map(profile => {
-                const lastSeen = new Date(profile.last_seen);
-                const isOnline = lastSeen > fiveMinutesAgo;
+                const lastSeen = profile.last_seen ? new Date(profile.last_seen) : new Date(0);
+                const isOnline = !isNaN(lastSeen.getTime()) && lastSeen > fiveMinutesAgo;
                 const unreadCount = unreadCounts[profile.id] || 0;
                 const displayName = profile.name || profile.username || 'Unknown';
                 const initials = displayName.substring(0, 2).toUpperCase();
@@ -2232,8 +2250,12 @@ function initializeApp() {
     
     // Format relative time
     function formatRelativeTime(date) {
+        if (!date) return 'unknown';
         const now = new Date();
-        const diff = now - date;
+        const dateObj = date instanceof Date ? date : new Date(date);
+        if (isNaN(dateObj.getTime())) return 'unknown';
+        
+        const diff = now - dateObj;
         const minutes = Math.floor(diff / 60000);
         const hours = Math.floor(diff / 3600000);
         const days = Math.floor(diff / 86400000);
@@ -2242,7 +2264,7 @@ function initializeApp() {
         if (minutes < 60) return `${minutes}m ago`;
         if (hours < 24) return `${hours}h ago`;
         if (days < 7) return `${days}d ago`;
-        return formatDate(date);
+        return formatDate(dateObj.toISOString());
     }
     
     // Add friend button
@@ -2283,7 +2305,7 @@ function initializeApp() {
                 .from('profiles')
                 .select('id')
                 .eq('username', username)
-                .single();
+                .maybeSingle();
             
             if (profileError || !profile) {
                 showStatus('User not found', 'error');
@@ -2296,11 +2318,14 @@ function initializeApp() {
             }
             
             // Check if already friends
+            const user1Id = user.id < profile.id ? user.id : profile.id;
+            const user2Id = user.id < profile.id ? profile.id : user.id;
             const { data: existingFriendship } = await supabase
                 .from('friendships')
                 .select('*')
-                .or(`and(user1_id.eq.${user.id},user2_id.eq.${profile.id}),and(user1_id.eq.${profile.id},user2_id.eq.${user.id})`)
-                .single();
+                .eq('user1_id', user1Id)
+                .eq('user2_id', user2Id)
+                .maybeSingle();
             
             if (existingFriendship) {
                 showStatus('You are already friends with this user', 'error');
@@ -2308,14 +2333,13 @@ function initializeApp() {
             }
             
             // Check if request already exists
-            const { data: existingRequest } = await supabase
+            const { data: existingRequests } = await supabase
                 .from('friend_requests')
                 .select('*')
                 .or(`and(sender_id.eq.${user.id},receiver_id.eq.${profile.id}),and(sender_id.eq.${profile.id},receiver_id.eq.${user.id})`)
-                .eq('status', 'pending')
-                .single();
+                .eq('status', 'pending');
             
-            if (existingRequest) {
+            if (existingRequests && existingRequests.length > 0) {
                 showStatus('Friend request already exists', 'error');
                 return;
             }
@@ -2438,7 +2462,8 @@ function initializeApp() {
         if (!user) return;
         
         // Find the request card element for smooth removal
-        const requestCard = document.querySelector(`[onclick*="handleFriendRequest('${requestId}'"]`)?.closest('.friend-request-card');
+        const requestCard = document.querySelector(`button[onclick*="handleFriendRequest('${requestId}'"]`)?.closest('.friend-request-card') ||
+                          document.querySelector(`.friend-request-card:has(button[onclick*="handleFriendRequest('${requestId}'"])`);
         
         try {
             if (action === 'cancel') {
@@ -2470,13 +2495,15 @@ function initializeApp() {
                 
                 if (fetchError) {
                     // Try without foreign key relation
-                    const { data: simpleRequest } = await supabase
+                    const { data: simpleRequest, error: simpleError } = await supabase
                         .from('friend_requests')
                         .select('*')
                         .eq('id', requestId)
-                        .single();
+                        .maybeSingle();
                     
-                    if (!simpleRequest) throw fetchError;
+                    if (simpleError || !simpleRequest) {
+                        throw fetchError || simpleError || new Error('Request not found');
+                    }
                     
                     // Get profiles separately
                     const userIds = [simpleRequest.sender_id, simpleRequest.receiver_id];
@@ -2745,25 +2772,59 @@ function initializeApp() {
         
         const sendBtn = document.getElementById('sendMessageBtn');
         if (!sendBtn) return;
+        const messagesList = document.getElementById('messagesList');
+        if (!messagesList) return;
+        
+        // Optimistically add message to UI
+        const tempId = 'temp_' + Date.now();
+        const time = formatDate(new Date().toISOString()) + ' ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message sent';
+        messageDiv.setAttribute('data-message-id', tempId);
+        messageDiv.style.opacity = '0.7';
+        messageDiv.innerHTML = `
+            <div class="message-bubble">${escapeHtml(content)}</div>
+            <div class="message-time">${time}</div>
+        `;
+        messagesList.appendChild(messageDiv);
+        messagesList.scrollTop = messagesList.scrollHeight;
+        
+        input.value = '';
         sendBtn.disabled = true;
         sendBtn.textContent = 'Sending...';
         
         try {
-            const { error } = await supabase
+            const { data: newMessage, error } = await supabase
                 .from('messages')
                 .insert([{
                     sender_id: user.id,
                     receiver_id: currentMessagingFriendId,
                     content: content
-                }]);
+                }])
+                .select()
+                .maybeSingle();
             
-            if (error) throw error;
+            if (error || !newMessage) {
+                throw error || new Error('Failed to send message');
+            }
             
-            input.value = '';
-            await loadMessages(currentMessagingFriendId);
+            // Update with real message ID and full opacity
+            messageDiv.setAttribute('data-message-id', newMessage.id);
+            messageDiv.style.opacity = '1';
+            messageDiv.style.transition = 'opacity 0.3s';
+            
+            // Update unread counts in friends list
+            if (document.getElementById('friendsTab')?.classList.contains('active')) {
+                loadFriends();
+            }
+            if (document.getElementById('friendsDashboard')?.classList.contains('active')) {
+                loadSidebarFriends();
+            }
         } catch (error) {
             console.error('Error sending message:', error);
+            messageDiv.remove();
             showStatus(getErrorMessage(error), 'error');
+            input.value = content; // Restore message
         } finally {
             sendBtn.disabled = false;
             sendBtn.textContent = 'Send';
