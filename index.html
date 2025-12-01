@@ -402,6 +402,36 @@
         </div>
     </div>
 
+    <!-- Group Chat Modal -->
+    <div id="groupChatModal" class="modal modal-large">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="groupChatTitle">Group Chat</h3>
+                <button class="modal-close" data-modal="groupChatModal">&times;</button>
+            </div>
+            <div class="message-content">
+                <div id="groupMessagesList" class="message-list"></div>
+                <div class="message-input-container">
+                    <input type="text" id="groupMessageInput" placeholder="Type a message...">
+                    <button id="sendGroupMessageBtn" class="btn btn-primary">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Analytics Modal -->
+    <div id="groupAnalyticsModal" class="modal modal-large">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="groupAnalyticsTitle">Group Analytics</h3>
+                <button class="modal-close" data-modal="groupAnalyticsModal">&times;</button>
+            </div>
+            <div id="groupAnalyticsContent" style="padding: 20px;">
+                <p class="loading">Loading analytics...</p>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="app.js"></script>
 </body>
 </html>
