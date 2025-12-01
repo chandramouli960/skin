@@ -72,6 +72,9 @@
 
     <!-- Main App (hidden until logged in) -->
     <div id="mainApp" style="display: none;">
+        <!-- Mobile Overlay -->
+        <div id="dashboardOverlay" class="dashboard-overlay"></div>
+        
         <!-- Left Dashboard Sidebar -->
         <aside class="dashboard-sidebar">
             <div class="dashboard-header">
@@ -132,6 +135,7 @@
         <!-- Top Header -->
         <header class="app-header">
             <div class="header-top">
+                <button id="dashboardToggleBtn" class="btn-icon dashboard-toggle-btn" title="Toggle Dashboard" style="display: none;">☰</button>
                 <h1>Goal Tracker</h1>
                 <div class="header-actions">
                     <button id="createGroupBtn" class="btn-icon" title="Create Group">+</button>
