@@ -1326,9 +1326,7 @@ body {
 .dashboard-list {
     flex: 1;
     padding: 12px;
-    max-height: calc(100vh - 170px); /* leave space for header + tabs */
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    /* Let the sidebar itself handle scrolling so content (like Friends) isn't cut off on mobile */
 }
 
 .dashboard-friend-item,
