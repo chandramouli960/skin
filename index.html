@@ -281,6 +281,28 @@
         </div>
     </div>
 
+    <!-- Edit Group Modal -->
+    <div id="editGroupModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Group</h3>
+                <button class="modal-close" data-modal="editGroupModal">&times;</button>
+            </div>
+            <form id="editGroupForm">
+                <input type="hidden" id="editGroupId">
+                <div class="form-group">
+                    <label for="editGroupName">Group Name</label>
+                    <input type="text" id="editGroupName" placeholder="Enter group name" required>
+                </div>
+                <div class="form-group">
+                    <label for="editGroupDescription">Description (Optional)</label>
+                    <textarea id="editGroupDescription" rows="3" placeholder="Enter group description"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Update Group</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Create Goal Modal -->
     <div id="createGoalModal" class="modal">
         <div class="modal-content">
