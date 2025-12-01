@@ -810,7 +810,7 @@ body {
        via the bottom navigation, so this avoids alignment and
        clipping issues without needing scrolling. */
     .dashboard-sidebar {
-        display: none;
+        display: none !important;
     }
 
     .dashboard-overlay {
