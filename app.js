@@ -1679,9 +1679,10 @@ function initializeApp() {
         if (!user) return;
         
         try {
+            // Get messages first
             const { data: messages, error } = await supabase
                 .from('group_messages')
-                .select('*, sender:profiles!group_messages_sender_id_fkey(id, name, username)')
+                .select('*')
                 .eq('group_id', groupId)
                 .order('created_at', { ascending: true });
             
@@ -1695,9 +1696,28 @@ function initializeApp() {
                 return;
             }
             
+            // Get unique sender IDs
+            const senderIds = [...new Set(messages.map(msg => msg.sender_id))];
+            
+            // Get profiles for all senders
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, name, username')
+                .in('id', senderIds);
+            
+            // Create a map for quick lookup
+            const profileMap = {};
+            if (profiles) {
+                profiles.forEach(profile => {
+                    profileMap[profile.id] = profile;
+                });
+            }
+            
+            // Render messages with profile data
             messagesList.innerHTML = messages.map(msg => {
                 const isOwn = msg.sender_id === user.id;
-                const senderName = msg.sender?.name || msg.sender?.username || 'Unknown';
+                const senderProfile = profileMap[msg.sender_id];
+                const senderName = senderProfile?.name || senderProfile?.username || 'Unknown';
                 const time = formatDate(msg.created_at) + ' ' + new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
                 
                 return `
