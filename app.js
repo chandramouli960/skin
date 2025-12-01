@@ -610,10 +610,12 @@ function initializeApp() {
                     <div class="card-content" onclick="viewGroup('${group.id}')" style="cursor: pointer;">${escapeHtml(group.description || 'No description')}</div>
                     <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>Created ${formatDate(group.created_at)}</span>
-                        <div style="display: flex; gap: 8px;">
-                            <button class="btn btn-primary btn-small" onclick="event.stopPropagation(); openGroupChat('${group.id}', '${escapeHtml(group.name)}')" style="font-size: 0.8rem;">Chat</button>
-                            <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); openGroupAnalytics('${group.id}', '${escapeHtml(group.name)}')" style="font-size: 0.8rem;">Analytics</button>
-                        </div>
+                        ${isOwner ? `
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); openEditGroupModal('${group.id}')" style="font-size: 0.8rem;">✏️ Edit</button>
+                                <button class="btn btn-danger btn-small" onclick="event.stopPropagation(); deleteGroup('${group.id}')" style="font-size: 0.8rem;">🗑️ Delete</button>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
@@ -815,6 +817,131 @@ function initializeApp() {
             loadProgress(true);
         } catch (error) {
             console.error('Error leaving group:', error);
+            showStatus(getErrorMessage(error), 'error');
+        }
+    };
+    
+    // Edit group modal
+    window.openEditGroupModal = async (groupId) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            const { data: group, error } = await supabase
+                .from('groups')
+                .select('*')
+                .eq('id', groupId)
+                .eq('created_by', user.id)
+                .maybeSingle();
+            
+            if (error || !group) {
+                showStatus('Group not found or you do not have permission to edit it', 'error');
+                return;
+            }
+            
+            document.getElementById('editGroupId').value = group.id;
+            document.getElementById('editGroupName').value = group.name;
+            document.getElementById('editGroupDescription').value = group.description || '';
+            openModal('editGroupModal');
+        } catch (error) {
+            console.error('Error loading group for edit:', error);
+            showStatus(getErrorMessage(error), 'error');
+        }
+    };
+    
+    // Edit group form submission
+    document.getElementById('editGroupForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            showStatus('Please log in', 'error');
+            return;
+        }
+        
+        const groupId = document.getElementById('editGroupId').value;
+        const name = document.getElementById('editGroupName').value.trim();
+        const description = document.getElementById('editGroupDescription').value.trim();
+        
+        if (!name || name.length < 2) {
+            showStatus('Please enter a valid group name (at least 2 characters)', 'error');
+            return;
+        }
+        
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating...';
+        
+        try {
+            const { error } = await supabase
+                .from('groups')
+                .update({
+                    name: name,
+                    description: description || null
+                })
+                .eq('id', groupId)
+                .eq('created_by', user.id);
+            
+            if (error) throw error;
+            
+            showStatus('Group updated successfully', 'success');
+            closeModal('editGroupModal');
+            document.getElementById('editGroupForm').reset();
+            clearCache();
+            loadGroups(true);
+        } catch (error) {
+            console.error('Error updating group:', error);
+            showStatus(getErrorMessage(error), 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Update Group';
+        }
+    });
+    
+    // Delete group
+    window.deleteGroup = async (groupId) => {
+        if (!confirm('Are you sure you want to delete this group? This will permanently delete the group, all group goals, and all associated progress. This action cannot be undone.')) {
+            return;
+        }
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        
+        try {
+            // Verify ownership
+            const { data: group, error: checkError } = await supabase
+                .from('groups')
+                .select('id, name')
+                .eq('id', groupId)
+                .eq('created_by', user.id)
+                .maybeSingle();
+            
+            if (checkError || !group) {
+                showStatus('Group not found or you do not have permission to delete it', 'error');
+                return;
+            }
+            
+            // Delete the group (cascade will handle related records)
+            const { error } = await supabase
+                .from('groups')
+                .delete()
+                .eq('id', groupId)
+                .eq('created_by', user.id);
+            
+            if (error) throw error;
+            
+            showStatus('Group deleted successfully', 'success');
+            clearCache();
+            loadGroups(true);
+            loadGoals(true);
+            loadProgress(true);
+            
+            // Clear group filter if viewing this group
+            if (currentViewingGroupId === groupId) {
+                currentViewingGroupId = null;
+            }
+        } catch (error) {
+            console.error('Error deleting group:', error);
             showStatus(getErrorMessage(error), 'error');
         }
     };
