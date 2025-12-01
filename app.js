@@ -3120,7 +3120,7 @@ function initializeApp() {
                 await updateFriendRequestsBadge();
             } else {
                 // Get the request
-                const { data: request, error: fetchError } = await supabase
+                let { data: request, error: fetchError } = await supabase
                     .from('friend_requests')
                     .select('*, sender:profiles!friend_requests_sender_id_fkey(id, name, username), receiver:profiles!friend_requests_receiver_id_fkey(id, name, username)')
                     .eq('id', requestId)
