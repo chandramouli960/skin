@@ -4,6 +4,11 @@
     box-sizing: border-box;
 }
 
+html {
+    background: var(--bg);
+    min-height: 100vh;
+}
+
 :root {
     --primary: #667eea;
     --primary-dark: #764ba2;
@@ -200,6 +205,8 @@ body {
 
 .app-main.with-sidebar {
     margin-left: 280px;
+    background: var(--bg);
+    min-height: 100vh;
 }
 
 .tab-content {
@@ -713,6 +720,7 @@ body {
     
     .app-main.with-sidebar {
         margin-left: 280px;
+        background: var(--bg);
     }
     
     .cards-list {
