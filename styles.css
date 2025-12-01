@@ -204,7 +204,7 @@ body {
 }
 
 .app-main.with-sidebar {
-    /* Sidebar is hidden on all breakpoints now, keep main content full width */
+    /* On mobile we override this to 0; on desktop the sidebar takes 280px */
     margin-left: 0;
     background: var(--bg);
     min-height: 100vh;
@@ -720,7 +720,7 @@ body {
     }
     
     .app-main.with-sidebar {
-        margin-left: 0;
+        margin-left: 280px;
         background: var(--bg);
     }
     
@@ -736,7 +736,7 @@ body {
     
     .app-header {
         padding: 20px 30px;
-        margin-left: 0;
+        margin-left: 280px;
         transition: margin-left 0.3s ease;
     }
     
@@ -1181,11 +1181,21 @@ body {
     line-height: 1.2;
 }
 
-/* Dashboard Sidebar */
+/* Dashboard Sidebar (desktop layout by default) */
 .dashboard-sidebar {
-    /* Sidebar is now purely a desktop enhancement. Hide by default and
-       let desktop-specific rules re-enable it if needed. */
-    display: none;
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    background: var(--card-bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .dashboard-content {
