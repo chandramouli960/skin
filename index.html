@@ -72,6 +72,57 @@
 
     <!-- Main App (hidden until logged in) -->
     <div id="mainApp" style="display: none;">
+        <!-- Left Dashboard Sidebar -->
+        <aside class="dashboard-sidebar">
+            <div class="dashboard-header">
+                <h2>Dashboard</h2>
+            </div>
+            <div class="dashboard-tabs">
+                <button class="dashboard-tab active" data-dashboard="friendsDashboard">
+                    <span class="dashboard-tab-icon">💬</span>
+                    <span>Friends</span>
+                </button>
+                <button class="dashboard-tab" data-dashboard="groupsDashboard">
+                    <span class="dashboard-tab-icon">👥</span>
+                    <span>Groups</span>
+                </button>
+                <button class="dashboard-tab" data-dashboard="goalsDashboard">
+                    <span class="dashboard-tab-icon">🎯</span>
+                    <span>My Goals</span>
+                </button>
+            </div>
+            <div class="dashboard-content">
+                <!-- Friends Dashboard -->
+                <div id="friendsDashboard" class="dashboard-panel active">
+                    <div class="dashboard-panel-header">
+                        <h3>Friends</h3>
+                        <button id="sidebarAddFriendBtn" class="btn-icon-small" title="Add Friend">+</button>
+                    </div>
+                    <div id="sidebarFriendsList" class="dashboard-list">
+                        <p class="loading">Loading friends...</p>
+                    </div>
+                </div>
+                <!-- Groups Dashboard -->
+                <div id="groupsDashboard" class="dashboard-panel">
+                    <div class="dashboard-panel-header">
+                        <h3>Groups</h3>
+                    </div>
+                    <div id="sidebarGroupsList" class="dashboard-list">
+                        <p class="loading">Loading groups...</p>
+                    </div>
+                </div>
+                <!-- Goals Dashboard -->
+                <div id="goalsDashboard" class="dashboard-panel">
+                    <div class="dashboard-panel-header">
+                        <h3>My Goals</h3>
+                    </div>
+                    <div id="sidebarGoalsList" class="dashboard-list">
+                        <p class="loading">Loading goals...</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
         <!-- Top Header -->
         <header class="app-header">
             <div class="header-top">
@@ -90,10 +141,29 @@
             <div class="user-info-header">
                 <span id="userName"></span>
             </div>
+            <!-- Desktop Navigation -->
+            <nav class="desktop-nav">
+                <button class="desktop-nav-item active" data-tab="groupsTab">
+                    <span class="desktop-nav-icon">👥</span>
+                    <span>Groups</span>
+                </button>
+                <button class="desktop-nav-item" data-tab="goalsTab">
+                    <span class="desktop-nav-icon">🎯</span>
+                    <span>Goals</span>
+                </button>
+                <button class="desktop-nav-item" data-tab="progressTab">
+                    <span class="desktop-nav-icon">📊</span>
+                    <span>Progress</span>
+                </button>
+                <button class="desktop-nav-item" data-tab="friendsTab">
+                    <span class="desktop-nav-icon">💬</span>
+                    <span>Friends</span>
+                </button>
+            </nav>
         </header>
 
         <!-- Main Content Area -->
-        <main class="app-main">
+        <main class="app-main with-sidebar">
             <!-- Groups Tab -->
             <div id="groupsTab" class="tab-content active">
                 <div class="section-header">
