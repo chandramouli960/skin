@@ -3486,42 +3486,84 @@ function initializeApp() {
         
         // Set up real-time subscription for new messages
         messageChannel = supabase
-            .channel(`messages:${friendId}:${user.id}`)
+            .channel(`messages:${friendId}:${user.id}`, {
+                config: {
+                    broadcast: { self: true }
+                }
+            })
             .on('postgres_changes', {
                 event: 'INSERT',
                 schema: 'public',
                 table: 'messages'
-            }, (payload) => {
-                const message = payload.new;
-                // Only process if it's for the current conversation
-                // Check if message is between current user and friend
-                const isBetweenUsers = (message.sender_id === user.id && message.receiver_id === friendId) ||
-                                      (message.sender_id === friendId && message.receiver_id === user.id);
-                
-                if (currentMessagingFriendId === friendId && isBetweenUsers) {
-                    handleNewMessage(message);
+            }, async (payload) => {
+                console.log('Real-time message received:', payload);
+                try {
+                    const message = payload.new;
+                    if (!message) {
+                        console.error('No message data in payload:', payload);
+                        return;
+                    }
+                    
+                    // Only process if it's for the current conversation
+                    // Check if message is between current user and friend
+                    const isBetweenUsers = (message.sender_id === user.id && message.receiver_id === friendId) ||
+                                          (message.sender_id === friendId && message.receiver_id === user.id);
+                    
+                    console.log('Message filter check:', {
+                        currentMessagingFriendId,
+                        friendId,
+                        isBetweenUsers,
+                        sender_id: message.sender_id,
+                        receiver_id: message.receiver_id,
+                        user_id: user.id
+                    });
+                    
+                    if (currentMessagingFriendId === friendId && isBetweenUsers) {
+                        console.log('Processing new message:', message);
+                        await handleNewMessage(message);
+                    } else {
+                        console.log('Message filtered out:', { currentMessagingFriendId, friendId, isBetweenUsers });
+                    }
+                } catch (error) {
+                    console.error('Error processing real-time message:', error);
                 }
             })
-            .subscribe((status) => {
+            .subscribe((status, err) => {
+                if (err) {
+                    console.error('Subscription error:', err);
+                }
+                console.log('Real-time subscription status:', status);
                 if (status === 'SUBSCRIBED') {
-                    console.log('Real-time messages subscribed');
+                    console.log('Real-time messages subscribed successfully');
+                } else if (status === 'CHANNEL_ERROR') {
+                    console.error('Channel error - real-time may not be enabled');
                 }
             });
     };
     
     // Handle new message from real-time subscription
     async function handleNewMessage(message) {
+        console.log('handleNewMessage called with:', message);
+        
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+            console.error('No user in handleNewMessage');
+            return;
+        }
         
         const messagesList = document.getElementById('messagesList');
-        if (!messagesList) return;
+        if (!messagesList) {
+            console.error('Messages list not found');
+            return;
+        }
         
         // Check if message already exists (prevent duplicates)
         const existingMessage = messagesList.querySelector(`[data-message-id="${message.id}"]`);
         if (existingMessage) {
+            console.log('Message already exists, updating temp ID if needed');
             // Update temp ID to real ID if it exists
-            if (existingMessage.getAttribute('data-message-id').startsWith('temp_')) {
+            const existingId = existingMessage.getAttribute('data-message-id');
+            if (existingId && existingId.startsWith('temp_')) {
                 existingMessage.setAttribute('data-message-id', message.id);
                 existingMessage.style.opacity = '1';
             }
@@ -3582,11 +3624,13 @@ function initializeApp() {
         
         messagesList.appendChild(messageDiv);
         
-        // Animate in
-        setTimeout(() => {
+        console.log('New message appended to DOM');
+        
+        // Animate in immediately
+        requestAnimationFrame(() => {
             messageDiv.style.opacity = '1';
             messageDiv.style.transform = 'translateY(0)';
-        }, 50);
+        });
         
         // Mark as read if received message
         if (!isSent) {
@@ -3610,9 +3654,9 @@ function initializeApp() {
         
         // Auto-scroll only if user was at bottom
         if (wasAtBottom) {
-            setTimeout(() => {
+            requestAnimationFrame(() => {
                 messagesList.scrollTop = messagesList.scrollHeight;
-            }, 100);
+            });
         }
     }
     
