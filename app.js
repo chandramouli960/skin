@@ -116,7 +116,7 @@ function initializeApp() {
     });
 
     // Tab navigation - prevent duplicate listeners
-    const navItems = document.querySelectorAll('.nav-item');
+    const navItems = document.querySelectorAll('.nav-item, .desktop-nav-item');
     navItems.forEach(item => {
         // Remove existing listener if any, then add new one
         const newItem = item.cloneNode(true);
@@ -144,14 +144,14 @@ function initializeApp() {
         }
         targetTab.classList.add('active');
         
-        // Update nav items
-        document.querySelectorAll('.nav-item').forEach(item => {
+        // Update nav items (both mobile and desktop)
+        document.querySelectorAll('.nav-item, .desktop-nav-item').forEach(item => {
             item.classList.remove('active');
         });
-        const navItem = document.querySelector(`[data-tab="${tabId}"]`);
-        if (navItem) {
-            navItem.classList.add('active');
-        }
+        const navItems = document.querySelectorAll(`[data-tab="${tabId}"]`);
+        navItems.forEach(item => {
+            item.classList.add('active');
+        });
         
         // Load data for the tab
         if (tabId === 'groupsTab') {
@@ -162,6 +162,10 @@ function initializeApp() {
             loadProgress();
         } else if (tabId === 'friendsTab') {
             loadFriends();
+            // Also refresh sidebar friends
+            if (typeof loadSidebarFriends === 'function') {
+                loadSidebarFriends();
+            }
         }
     }
 
@@ -214,6 +218,10 @@ function initializeApp() {
         updateLastSeen();
         // Update last seen every 30 seconds
         setInterval(updateLastSeen, 30000);
+        // Load dashboard sidebar
+        setTimeout(() => {
+            loadSidebarFriends();
+        }, 500);
     }
     
     // Update last seen timestamp
@@ -547,6 +555,11 @@ function initializeApp() {
             groupsCache = groups || [];
             cacheTimestamp = Date.now();
             displayGroups(groups || []);
+            
+            // Also refresh sidebar if active
+            if (document.getElementById('groupsDashboard')?.classList.contains('active')) {
+                loadSidebarGroups();
+            }
         } catch (error) {
             console.error('Error loading groups:', error);
             groupsList.innerHTML = `<div class="empty-state" style="color: var(--error);"><p>❌ Error loading groups</p><p style="font-size: 0.9rem; margin-top: 10px;">${getErrorMessage(error)}</p></div>`;
@@ -1781,6 +1794,225 @@ function initializeApp() {
         progressDate.valueAsDate = today;
         progressDate.max = new Date().toISOString().split('T')[0]; // Prevent future dates
     }
+
+    // ========== DASHBOARD SIDEBAR ==========
+    
+    // Dashboard tab switching
+    const dashboardTabs = document.querySelectorAll('.dashboard-tab');
+    dashboardTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const dashboardId = tab.getAttribute('data-dashboard');
+            
+            // Remove active from all tabs and panels
+            document.querySelectorAll('.dashboard-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.dashboard-panel').forEach(p => p.classList.remove('active'));
+            
+            // Add active to clicked tab and corresponding panel
+            tab.classList.add('active');
+            const panel = document.getElementById(dashboardId);
+            if (panel) {
+                panel.classList.add('active');
+            }
+            
+            // Load data for the dashboard panel
+            if (dashboardId === 'friendsDashboard') {
+                loadSidebarFriends();
+            } else if (dashboardId === 'groupsDashboard') {
+                loadSidebarGroups();
+            } else if (dashboardId === 'goalsDashboard') {
+                loadSidebarGoals();
+            }
+        });
+    });
+    
+    // Sidebar add friend button
+    document.getElementById('sidebarAddFriendBtn')?.addEventListener('click', () => {
+        openModal('addFriendModal');
+    });
+    
+    // Load sidebar friends
+    async function loadSidebarFriends() {
+        const friendsList = document.getElementById('sidebarFriendsList');
+        if (!friendsList) return;
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            
+            const { data: friendships } = await supabase
+                .from('friendships')
+                .select('*')
+                .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`);
+            
+            if (!friendships || friendships.length === 0) {
+                friendsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-light); font-size: 0.85rem;">No friends yet</div>';
+                return;
+            }
+            
+            const friendIds = friendships.map(f => 
+                f.user1_id === user.id ? f.user2_id : f.user1_id
+            );
+            
+            const { data: profiles } = await supabase
+                .from('profiles')
+                .select('id, name, username, last_seen')
+                .in('id', friendIds);
+            
+            // Check unread messages
+            const { data: unreadMessages } = await supabase
+                .from('messages')
+                .select('sender_id')
+                .eq('receiver_id', user.id)
+                .eq('is_read', false);
+            
+            const unreadCounts = {};
+            if (unreadMessages) {
+                unreadMessages.forEach(msg => {
+                    unreadCounts[msg.sender_id] = (unreadCounts[msg.sender_id] || 0) + 1;
+                });
+            }
+            
+            const now = new Date();
+            const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+            
+            friendsList.innerHTML = profiles.map(profile => {
+                const lastSeen = new Date(profile.last_seen);
+                const isOnline = lastSeen > fiveMinutesAgo;
+                const displayName = profile.name || profile.username || 'Unknown';
+                const initials = displayName.substring(0, 2).toUpperCase();
+                const unreadCount = unreadCounts[profile.id] || 0;
+                
+                return `
+                    <div class="dashboard-friend-item" onclick="openMessageModal('${profile.id}', '${escapeHtml(displayName)}')">
+                        <div class="dashboard-friend-avatar">${initials}</div>
+                        <div class="dashboard-friend-info">
+                            <div class="dashboard-friend-name">${escapeHtml(displayName)}${unreadCount > 0 ? ` <span class="unread-badge" style="font-size: 0.7rem; padding: 1px 6px;">${unreadCount}</span>` : ''}</div>
+                            <div class="dashboard-friend-status">
+                                <span class="dashboard-status-indicator ${isOnline ? 'online' : 'offline'}"></span>
+                                ${isOnline ? 'Online' : 'Offline'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('Error loading sidebar friends:', error);
+            friendsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--error); font-size: 0.85rem;">Error loading friends</div>';
+        }
+    }
+    
+    // Load sidebar groups
+    async function loadSidebarGroups() {
+        const groupsList = document.getElementById('sidebarGroupsList');
+        if (!groupsList) return;
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            
+            const { data: memberships } = await supabase
+                .from('group_members')
+                .select('group_id')
+                .eq('user_id', user.id);
+            
+            if (!memberships || memberships.length === 0) {
+                groupsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-light); font-size: 0.85rem;">No groups yet</div>';
+                return;
+            }
+            
+            const groupIds = memberships.map(m => m.group_id);
+            
+            const { data: groups } = await supabase
+                .from('groups')
+                .select('*')
+                .in('id', groupIds)
+                .order('created_at', { ascending: false });
+            
+            if (!groups || groups.length === 0) {
+                groupsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-light); font-size: 0.85rem;">No groups yet</div>';
+                return;
+            }
+            
+            groupsList.innerHTML = groups.map(group => {
+                return `
+                    <div class="dashboard-group-item" onclick="viewGroup('${group.id}'); switchTab('goalsTab');">
+                        <div class="dashboard-group-name">${escapeHtml(group.name)}</div>
+                        <div class="dashboard-group-subtitle">Code: ${escapeHtml(group.code)}</div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('Error loading sidebar groups:', error);
+            groupsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--error); font-size: 0.85rem;">Error loading groups</div>';
+        }
+    }
+    
+    // Load sidebar goals
+    async function loadSidebarGoals() {
+        const goalsList = document.getElementById('sidebarGoalsList');
+        if (!goalsList) return;
+        
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            
+            const { data: memberships } = await supabase
+                .from('group_members')
+                .select('group_id')
+                .eq('user_id', user.id);
+            
+            const groupIds = memberships ? memberships.map(m => m.group_id) : [];
+            
+            let query = supabase
+                .from('goals')
+                .select('*')
+                .eq('is_active', true)
+                .order('created_at', { ascending: false });
+            
+            if (groupIds.length > 0) {
+                query = query.or(`user_id.eq.${user.id},group_id.in.(${groupIds.join(',')})`);
+            } else {
+                query = query.eq('user_id', user.id);
+            }
+            
+            const { data: goals } = await query;
+            
+            if (!goals || goals.length === 0) {
+                goalsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-light); font-size: 0.85rem;">No goals yet</div>';
+                return;
+            }
+            
+            // Get progress counts
+            const goalIds = goals.map(g => g.id);
+            const { data: progressEntries } = await supabase
+                .from('progress_entries')
+                .select('goal_id')
+                .in('goal_id', goalIds);
+            
+            const progressCounts = {};
+            if (progressEntries) {
+                progressEntries.forEach(entry => {
+                    progressCounts[entry.goal_id] = (progressCounts[entry.goal_id] || 0) + 1;
+                });
+            }
+            
+            goalsList.innerHTML = goals.map(goal => {
+                const progressCount = progressCounts[goal.id] || 0;
+                return `
+                    <div class="dashboard-goal-item" onclick="viewGoalDetails('${goal.id}')">
+                        <div class="dashboard-goal-name">${escapeHtml(goal.title)}</div>
+                        <div class="dashboard-goal-subtitle">${progressCount}/${goal.target_days} days • ${goal.frequency}</div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('Error loading sidebar goals:', error);
+            goalsList.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: var(--error); font-size: 0.85rem;">Error loading goals</div>';
+        }
+    }
+    
+    // Refresh sidebar when main data loads (called after functions are defined)
+    // This will be called from the respective load functions
 
     // ========== FRIENDS ==========
     
