@@ -1162,21 +1162,38 @@ function initializeApp() {
                 }
             });
         }
-        
-        goalsList.innerHTML = goals.map(goal => {
+
+        // Helper to render a single goal card (used for both personal and group lists)
+        const renderGoalCard = (goal) => {
             const progressCount = progressCounts[goal.id] || 0;
             const progressPercent = goal.target_days ? Math.min((progressCount / goal.target_days) * 100, 100) : 0;
-            const groupName = goal.groups ? ` • ${escapeHtml(goal.groups.name)}` : '';
+            const groupName = goal.groups ? escapeHtml(goal.groups.name) : '';
             const isOwner = goal.user_id === currentUser?.id;
             const reactions = reactionCounts[goal.id] || { likes: 0, dislikes: 0 };
             const userReaction = userReactions[goal.id];
+            const isGroupGoal = !!goal.group_id;
+
+            const typeBadge = isGroupGoal
+                ? '<span class="goal-badge goal-badge-group">Group</span>'
+                : '<span class="goal-badge goal-badge-personal">Personal</span>';
+
+            const groupLabel = isGroupGoal && groupName
+                ? `<div class="goal-meta-line"><span class="goal-group-label">Group:</span> ${groupName}</div>`
+                : '';
             
             return `
-                <div class="card">
+                <div class="card goal-card ${isGroupGoal ? 'goal-card-group' : 'goal-card-personal'}">
                     <div class="card-header">
                         <div onclick="viewGoalDetails('${goal.id}')" style="flex: 1; cursor: pointer;">
-                            <div class="card-title">${escapeHtml(goal.title)}${groupName}</div>
-                            <div class="card-subtitle">${goal.frequency} • ${progressCount}/${goal.target_days} days</div>
+                            <div class="card-title">
+                                ${typeBadge}
+                                <span class="goal-title-text">${escapeHtml(goal.title)}</span>
+                            </div>
+                            <div class="card-subtitle">
+                                <span class="goal-frequency">${goal.frequency}</span>
+                                <span class="goal-progress-count">${progressCount}/${goal.target_days} days</span>
+                            </div>
+                            ${groupLabel}
                         </div>
                         ${isOwner ? `
                             <div class="card-actions">
@@ -1185,7 +1202,9 @@ function initializeApp() {
                             </div>
                         ` : ''}
                     </div>
-                    <div class="card-content" onclick="viewGoalDetails('${goal.id}')" style="cursor: pointer;">${escapeHtml(goal.description || 'No description')}</div>
+                    <div class="card-content" onclick="viewGoalDetails('${goal.id}')" style="cursor: pointer;">
+                        ${escapeHtml(goal.description || 'No description')}
+                    </div>
                     <div class="goal-progress">
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: ${progressPercent}%"></div>
@@ -1204,7 +1223,41 @@ function initializeApp() {
                     </div>
                 </div>
             `;
-        }).join('');
+        };
+
+        // Separate personal and group goals
+        const personalGoals = goals.filter(g => !g.group_id);
+        const groupGoals = goals.filter(g => !!g.group_id);
+
+        let html = '';
+
+        if (personalGoals.length > 0) {
+            html += `
+                <section class="goals-section goals-section-personal">
+                    <div class="goals-section-header">
+                        <h3>Personal Goals</h3>
+                    </div>
+                    <div class="goals-section-list">
+                        ${personalGoals.map(renderGoalCard).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        if (groupGoals.length > 0) {
+            html += `
+                <section class="goals-section goals-section-group">
+                    <div class="goals-section-header">
+                        <h3>Group Goals</h3>
+                    </div>
+                    <div class="goals-section-list">
+                        ${groupGoals.map(renderGoalCard).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        goalsList.innerHTML = html;
     }
 
     // Update goal group dropdown
@@ -2772,6 +2825,9 @@ function initializeApp() {
                                 ${isOnline ? 'Online' : 'Offline'}
                             </div>
                         </div>
+                        <div class="dashboard-friend-actions">
+                            <button class="btn btn-danger btn-ghost btn-icon" title="Remove friend" onclick="event.stopPropagation(); removeFriend('${profile.id}', '${escapeHtml(displayName)}')">🗑️</button>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -2979,6 +3035,7 @@ function initializeApp() {
                         </div>
                         <div class="friend-actions">
                             <button class="btn btn-primary btn-small" onclick="openMessageModal('${profile.id}', '${escapeHtml(displayName)}')">Message</button>
+                            <button class="btn btn-danger btn-small" onclick="removeFriend('${profile.id}', '${escapeHtml(displayName)}')">Remove</button>
                         </div>
                     </div>
                 `;
@@ -3018,6 +3075,33 @@ function initializeApp() {
         openModal('friendRequestsModal');
         await loadFriendRequests();
     });
+
+    // Remove friend
+    window.removeFriend = async (friendId, friendName) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        if (!confirm(`Remove ${friendName} from your friends list?`)) {
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('friendships')
+                .delete()
+                .or(`and(user1_id.eq.${user.id},user2_id.eq.${friendId}),and(user1_id.eq.${friendId},user2_id.eq.${user.id})`);
+
+            if (error) throw error;
+
+            showStatus('Friend removed successfully', 'success');
+            await loadFriends();
+            await loadSidebarFriends();
+            await updateFriendRequestsBadge();
+        } catch (error) {
+            console.error('Error removing friend:', error);
+            showStatus(getErrorMessage(error), 'error');
+        }
+    };
     
     // Send friend request
     document.getElementById('addFriendForm')?.addEventListener('submit', async (e) => {
