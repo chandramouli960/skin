@@ -805,41 +805,29 @@ body {
 
 /* Responsive - Mobile */
 @media (max-width: 767px) {
+    /* Hide the left dashboard completely on mobile.
+       Users can still access Groups / Goals / Progress / Friends
+       via the bottom navigation, so this avoids alignment and
+       clipping issues without needing scrolling. */
     .dashboard-sidebar {
-        transform: translateX(-100%);
-        transition: transform 0.3s ease;
-        z-index: 100;
-        /* Stop the sidebar from sitting behind the bottom nav; this keeps
-           the Friends section fully visible without needing to scroll. */
-        bottom: 56px; /* approximate bottom nav height */
+        display: none;
     }
-    
-    .dashboard-sidebar.mobile-open {
-        transform: translateX(0);
+
+    .dashboard-overlay {
+        display: none !important;
     }
-    
+
     .app-main.with-sidebar {
         margin-left: 0;
     }
-    
+
     .app-header {
         margin-left: 0;
         padding: 15px 20px;
     }
-    
-    .header-top {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    
-    .header-top h1 {
-        font-size: 1.3rem;
-        margin: 0;
-    }
-    
+
     .dashboard-toggle-btn {
-        display: flex !important;
+        display: none !important;
     }
 }
 
