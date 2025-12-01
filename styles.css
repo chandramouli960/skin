@@ -1094,6 +1094,18 @@ body {
     margin-left: 8px;
 }
 
+.notification-badge {
+    background: var(--error);
+    color: white;
+    border-radius: 10px;
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    min-width: 18px;
+    text-align: center;
+    line-height: 1.2;
+}
+
 /* Dashboard Sidebar */
 .dashboard-sidebar {
     position: fixed;
