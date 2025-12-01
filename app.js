@@ -2888,32 +2888,45 @@ function initializeApp() {
             // Find user by username (case-insensitive search)
             const trimmedUsername = username.trim();
             
-            // Use PostgREST filter with ilike operator for case-insensitive exact match
-            // Try exact match first (case-sensitive, faster)
+            if (!trimmedUsername) {
+                showStatus('Please enter a username', 'error');
+                return;
+            }
+            
+            // Try exact match first (case-sensitive, faster) - matches the working curl query
             let { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select('id, username')
                 .eq('username', trimmedUsername)
                 .maybeSingle();
             
-            // If not found, try case-insensitive search using filter API
-            if (!profile && !profileError) {
-                const { data: profiles } = await supabase
-                    .from('profiles')
-                    .select('id, username');
-                
-                // Find exact match (case-insensitive) from all profiles
-                profile = profiles?.find(p => 
-                    p.username && p.username.toLowerCase() === trimmedUsername.toLowerCase()
-                );
-            }
-            
+            // Log for debugging
             if (profileError) {
                 console.error('Error finding user:', profileError);
                 showStatus('Error searching for user. Please try again.', 'error');
                 return;
             }
             
+            // If exact match not found, try case-insensitive search
+            if (!profile) {
+                const { data: allProfiles, error: allProfilesError } = await supabase
+                    .from('profiles')
+                    .select('id, username')
+                    .not('username', 'is', null);
+                
+                if (allProfilesError) {
+                    console.error('Error fetching profiles for case-insensitive search:', allProfilesError);
+                    showStatus('Error searching for user. Please try again.', 'error');
+                    return;
+                }
+                
+                // Find exact match (case-insensitive)
+                profile = allProfiles?.find(p => 
+                    p.username && p.username.toLowerCase() === trimmedUsername.toLowerCase()
+                );
+            }
+            
+            // Check if user was found
             if (!profile) {
                 showStatus('User not found', 'error');
                 return;
