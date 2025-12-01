@@ -2432,6 +2432,50 @@ function initializeApp() {
 
     // ========== DASHBOARD SIDEBAR ==========
     
+    // Mobile dashboard toggle
+    const dashboardToggleBtn = document.getElementById('dashboardToggleBtn');
+    const dashboardSidebar = document.querySelector('.dashboard-sidebar');
+    const dashboardOverlay = document.getElementById('dashboardOverlay');
+    
+    function toggleDashboard() {
+        if (dashboardSidebar && dashboardOverlay) {
+            const isOpen = dashboardSidebar.classList.contains('mobile-open');
+            if (isOpen) {
+                dashboardSidebar.classList.remove('mobile-open');
+                dashboardOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+            } else {
+                dashboardSidebar.classList.add('mobile-open');
+                dashboardOverlay.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+    }
+    
+    function closeDashboard() {
+        if (dashboardSidebar && dashboardOverlay) {
+            dashboardSidebar.classList.remove('mobile-open');
+            dashboardOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+    }
+    
+    dashboardToggleBtn?.addEventListener('click', toggleDashboard);
+    dashboardOverlay?.addEventListener('click', closeDashboard);
+    
+    // Show/hide toggle button based on screen size
+    function updateDashboardToggle() {
+        if (window.innerWidth <= 767) {
+            dashboardToggleBtn.style.display = 'flex';
+        } else {
+            dashboardToggleBtn.style.display = 'none';
+            closeDashboard();
+        }
+    }
+    
+    updateDashboardToggle();
+    window.addEventListener('resize', updateDashboardToggle);
+    
     // Dashboard tab switching
     const dashboardTabs = document.querySelectorAll('.dashboard-tab');
     dashboardTabs.forEach(tab => {
@@ -2456,6 +2500,11 @@ function initializeApp() {
                 loadSidebarGroups();
             } else if (dashboardId === 'goalsDashboard') {
                 loadSidebarGoals();
+            }
+            
+            // Close sidebar on mobile after tab switch
+            if (window.innerWidth <= 767) {
+                closeDashboard();
             }
         });
     });
@@ -2836,14 +2885,36 @@ function initializeApp() {
         submitBtn.textContent = 'Sending...';
         
         try {
-            // Find user by username
-            const { data: profile, error: profileError } = await supabase
+            // Find user by username (case-insensitive search)
+            const trimmedUsername = username.trim();
+            
+            // Use PostgREST filter with ilike operator for case-insensitive exact match
+            // Try exact match first (case-sensitive, faster)
+            let { data: profile, error: profileError } = await supabase
                 .from('profiles')
-                .select('id')
-                .eq('username', username)
+                .select('id, username')
+                .eq('username', trimmedUsername)
                 .maybeSingle();
             
-            if (profileError || !profile) {
+            // If not found, try case-insensitive search using filter API
+            if (!profile && !profileError) {
+                const { data: profiles } = await supabase
+                    .from('profiles')
+                    .select('id, username');
+                
+                // Find exact match (case-insensitive) from all profiles
+                profile = profiles?.find(p => 
+                    p.username && p.username.toLowerCase() === trimmedUsername.toLowerCase()
+                );
+            }
+            
+            if (profileError) {
+                console.error('Error finding user:', profileError);
+                showStatus('Error searching for user. Please try again.', 'error');
+                return;
+            }
+            
+            if (!profile) {
                 showStatus('User not found', 'error');
                 return;
             }
