@@ -468,6 +468,7 @@ body {
     max-width: 500px;
     max-height: 90vh;
     overflow-y: auto;
+    padding-bottom: 80px; /* Leave space so bottom content isn't hidden behind bottom nav on mobile */
     box-shadow: var(--shadow-lg);
     animation: modalSlideIn 0.3s;
 }
