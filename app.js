@@ -1358,6 +1358,7 @@ function initializeApp() {
         const groupId = document.getElementById('goalGroup').value || null;
         const frequency = document.getElementById('goalFrequency').value;
         const targetDays = parseInt(document.getElementById('goalTargetDays').value) || 30;
+        const maxLogsPerDay = parseInt(document.getElementById('goalMaxLogsPerDay').value) || 1;
         
         // Validation
         if (!title || title.length < 2) {
@@ -1367,6 +1368,11 @@ function initializeApp() {
         
         if (targetDays < 1 || targetDays > 1000) {
             showStatus('Target days must be between 1 and 1000', 'error');
+            return;
+        }
+
+        if (maxLogsPerDay < 1 || maxLogsPerDay > 50) {
+            showStatus('Max logs per day must be between 1 and 50', 'error');
             return;
         }
         
@@ -1384,6 +1390,7 @@ function initializeApp() {
                     description: description,
                     frequency: frequency,
                     target_days: targetDays,
+                    max_logs_per_day: maxLogsPerDay,
                     is_active: true
                 }]);
             
@@ -1416,6 +1423,10 @@ function initializeApp() {
         document.getElementById('goalDescription').value = goal.description || '';
         document.getElementById('goalFrequency').value = goal.frequency;
         document.getElementById('goalTargetDays').value = goal.target_days;
+        const maxLogsInput = document.getElementById('goalMaxLogsPerDay');
+        if (maxLogsInput) {
+            maxLogsInput.value = goal.max_logs_per_day || 1;
+        }
         
         // Set group if exists
         await updateGoalGroupDropdown();
@@ -1447,9 +1458,15 @@ function initializeApp() {
             const groupId = document.getElementById('goalGroup').value || null;
             const frequency = document.getElementById('goalFrequency').value;
             const targetDays = parseInt(document.getElementById('goalTargetDays').value) || 30;
+            const maxLogsPerDay = parseInt(document.getElementById('goalMaxLogsPerDay').value) || 1;
             
             if (!title || title.length < 2) {
                 showStatus('Goal title must be at least 2 characters', 'error');
+                return;
+            }
+
+            if (maxLogsPerDay < 1 || maxLogsPerDay > 50) {
+                showStatus('Max logs per day must be between 1 and 50', 'error');
                 return;
             }
             
@@ -1465,7 +1482,8 @@ function initializeApp() {
                         description: description,
                         group_id: groupId,
                         frequency: frequency,
-                        target_days: targetDays
+                        target_days: targetDays,
+                        max_logs_per_day: maxLogsPerDay
                     })
                     .eq('id', goalId)
                     .eq('user_id', user.id);
@@ -2534,17 +2552,26 @@ function initializeApp() {
         submitBtn.textContent = 'Logging...';
         
         try {
-            // Check for duplicate entry (same goal, user, and date)
-            const { data: existing } = await supabase
+            // Get goal to enforce per-day log limit
+            const { data: goal } = await supabase
+                .from('goals')
+                .select('id, max_logs_per_day')
+                .eq('id', goalId)
+                .maybeSingle();
+
+            const maxLogsPerDay = goal?.max_logs_per_day || 1;
+
+            // Count how many logs this user already has for this goal on this date
+            const { data: existingLogs } = await supabase
                 .from('progress_entries')
-                .select('id')
+                .select('id', { count: 'exact', head: true })
                 .eq('goal_id', goalId)
                 .eq('user_id', user.id)
-                .eq('date', date)
-                .maybeSingle();
-            
-            if (existing) {
-                showStatus('You have already logged progress for this goal on this date. Please select a different date.', 'error');
+                .eq('date', date);
+
+            const currentCount = existingLogs?.length ?? 0;
+            if (currentCount >= maxLogsPerDay) {
+                showStatus(`You can only log progress ${maxLogsPerDay} time${maxLogsPerDay > 1 ? 's' : ''} per day for this goal.`, 'error');
                 return;
             }
             
