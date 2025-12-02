@@ -3003,8 +3003,16 @@ function initializeApp() {
                             </div>
                         </div>
                         <div class="friend-actions">
-                            <button class="btn btn-primary btn-small" onclick="openMessageModal('${profile.id}', '${escapeHtml(displayName)}')">Message</button>
-                            <button class="btn btn-danger btn-small" onclick="removeFriend('${profile.id}', '${escapeHtml(displayName)}')">Remove</button>
+                            <button
+                                class="btn-icon-small"
+                                title="Message"
+                                onclick="openMessageModal('${profile.id}', '${escapeHtml(displayName)}')"
+                            >💬</button>
+                            <button
+                                class="btn-icon-small"
+                                title="Remove friend"
+                                onclick="removeFriend('${profile.id}', '${escapeHtml(displayName)}')"
+                            >🗑️</button>
                         </div>
                     </div>
                 `;
