@@ -850,6 +850,9 @@ function initializeApp() {
             document.getElementById('joinGroupForm').reset();
             clearCache();
             loadGroups(true);
+            // Recompute group goal progress using updated member counts
+            loadGoals(true);
+            loadProgress(true);
         } catch (error) {
             console.error('Error joining group:', error);
             showStatus(getErrorMessage(error), 'error');
@@ -1069,7 +1072,31 @@ function initializeApp() {
             userGoals = goals || [];
             goalsCache = goals || [];
             cacheTimestamp = Date.now();
-            await displayGoals(goals || []);
+
+            // For group goals, fetch member counts so group progress is averaged per member.
+            let groupMemberCounts = {};
+            const groupIdsNeedingCounts = [...new Set((goals || []).filter(g => g.group_id).map(g => g.group_id))];
+            if (groupIdsNeedingCounts.length > 0) {
+                const { data: groupMembers } = await supabase
+                    .from('group_members')
+                    .select('group_id, user_id')
+                    .in('group_id', groupIdsNeedingCounts);
+
+                if (groupMembers) {
+                    const map = {};
+                    groupMembers.forEach(m => {
+                        if (!map[m.group_id]) {
+                            map[m.group_id] = new Set();
+                        }
+                        map[m.group_id].add(m.user_id);
+                    });
+                    Object.keys(map).forEach(groupId => {
+                        groupMemberCounts[groupId] = map[groupId].size;
+                    });
+                }
+            }
+
+            await displayGoals(goals || [], groupMemberCounts);
             
             // Update goal group dropdown
             updateGoalGroupDropdown();
@@ -1080,7 +1107,7 @@ function initializeApp() {
     }
 
     // Display goals with edit/delete functionality
-    async function displayGoals(goals) {
+    async function displayGoals(goals, groupMemberCounts = {}) {
         const goalsList = document.getElementById('goalsList');
         const sectionHeader = document.querySelector('#goalsTab .section-header h2');
         
@@ -1122,7 +1149,7 @@ function initializeApp() {
             return;
         }
         
-        // Optimized: Single query for all progress counts
+            // Optimized: Single query for all progress counts
         const goalIds = goals.map(g => g.id);
         const { data: progressEntries } = await supabase
             .from('progress_entries')
@@ -1166,7 +1193,11 @@ function initializeApp() {
         // Helper to render a single goal card (used for both personal and group lists)
         const renderGoalCard = (goal) => {
             const progressCount = progressCounts[goal.id] || 0;
-            const progressPercent = goal.target_days ? Math.min((progressCount / goal.target_days) * 100, 100) : 0;
+            // For group goals, require each member to complete target_days.
+            // So completion = total entries / (target_days * memberCount).
+            const memberCount = goal.group_id ? (groupMemberCounts[goal.group_id] || 1) : 1;
+            const denominator = goal.target_days && memberCount ? goal.target_days * memberCount : goal.target_days || 1;
+            const progressPercent = denominator ? Math.min((progressCount / denominator) * 100, 100) : 0;
             const groupName = goal.groups ? escapeHtml(goal.groups.name) : '';
             const isOwner = goal.user_id === currentUser?.id;
             const reactions = reactionCounts[goal.id] || { likes: 0, dislikes: 0 };
@@ -2071,7 +2102,7 @@ function initializeApp() {
             // Get all group members
             const { data: members } = await supabase
                 .from('group_members')
-                .select('user_id, profiles(id, name, username)')
+                .select('user_id')
                 .eq('group_id', groupId);
             
             if (!members || members.length === 0) {
@@ -2080,6 +2111,19 @@ function initializeApp() {
             }
             
             const memberIds = members.map(m => m.user_id);
+
+            // Get profiles for all members (separate query to avoid PostgREST join issues)
+            const { data: memberProfiles } = await supabase
+                .from('profiles')
+                .select('id, name, username')
+                .in('id', memberIds);
+
+            const memberProfileMap = {};
+            if (memberProfiles) {
+                memberProfiles.forEach(p => {
+                    memberProfileMap[p.id] = p;
+                });
+            }
             
             // Get all goals for this group
             const { data: goals } = await supabase
@@ -2105,8 +2149,8 @@ function initializeApp() {
             const userStats = {};
             
             memberIds.forEach(memberId => {
-                const member = members.find(m => m.user_id === memberId);
-                const memberName = member?.profiles?.name || member?.profiles?.username || 'Unknown';
+                const profile = memberProfileMap[memberId];
+                const memberName = profile?.name || profile?.username || 'Unknown';
                 userStats[memberId] = {
                     name: memberName,
                     totalGoals: goals.length,
