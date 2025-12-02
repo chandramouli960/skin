@@ -2653,65 +2653,8 @@ function initializeApp() {
     }
 
     // ========== DASHBOARD SIDEBAR ==========
-    
-    // Mobile dashboard toggle
-    const dashboardToggleBtn = document.getElementById('dashboardToggleBtn');
-    const dashboardSidebar = document.querySelector('.dashboard-sidebar');
-    const dashboardOverlay = document.getElementById('dashboardOverlay');
-
-    // On small screens we rely entirely on the bottom nav, so hide the
-    // sidebar by default to avoid it covering the app even if CSS cache
-    // is stale or media queries behave differently on some devices.
-    if (window.innerWidth <= 767 && dashboardSidebar) {
-        dashboardSidebar.style.display = 'none';
-    }
-    
-    function toggleDashboard() {
-        if (dashboardSidebar && dashboardOverlay) {
-            const isOpen = dashboardSidebar.classList.contains('mobile-open');
-            if (isOpen) {
-                dashboardSidebar.classList.remove('mobile-open');
-                dashboardOverlay.classList.remove('active');
-                document.body.style.overflow = '';
-            } else {
-                dashboardSidebar.classList.add('mobile-open');
-                dashboardOverlay.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            }
-        }
-    }
-    
-    function closeDashboard() {
-        if (dashboardSidebar && dashboardOverlay) {
-            dashboardSidebar.classList.remove('mobile-open');
-            dashboardOverlay.classList.remove('active');
-            document.body.style.overflow = '';
-        }
-    }
-    
-    dashboardToggleBtn?.addEventListener('click', toggleDashboard);
-    dashboardOverlay?.addEventListener('click', closeDashboard);
-    
-    // On desktop we can still show the dashboard toggle, but on mobile
-    // we hide it and rely on the bottom navigation instead.
-    function updateDashboardToggle() {
-        if (!dashboardToggleBtn) return;
-        if (window.innerWidth <= 767) {
-            dashboardToggleBtn.style.display = 'none';
-            if (dashboardSidebar) {
-                dashboardSidebar.style.display = 'none';
-            }
-            closeDashboard();
-        } else {
-            dashboardToggleBtn.style.display = 'flex';
-            if (dashboardSidebar) {
-                dashboardSidebar.style.display = 'flex';
-            }
-        }
-    }
-
-    updateDashboardToggle();
-    window.addEventListener('resize', updateDashboardToggle);
+    // Dashboard sidebar and toggle button have been removed.
+    // Navigation is now handled entirely by the top desktop nav and bottom mobile nav.
     
     // Dashboard tab switching
     const dashboardTabs = document.querySelectorAll('.dashboard-tab');
