@@ -2154,6 +2154,17 @@ function initializeApp() {
             const statsArray = Object.values(userStats).sort((a, b) => b.totalProgressEntries - a.totalProgressEntries);
             
             analyticsContent.innerHTML = `
+                <div style="margin-bottom: 25px;">
+                    <h4 style="margin-bottom: 10px; color: var(--primary);">Members</h4>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        ${statsArray.map(stats => `
+                            <span style="padding: 6px 10px; border-radius: 999px; background: var(--secondary); font-size: 0.85rem; color: var(--text);">
+                                ${escapeHtml(stats.name)}
+                            </span>
+                        `).join('')}
+                    </div>
+                </div>
+
                 <div style="margin-bottom: 30px;">
                     <h4 style="margin-bottom: 15px; color: var(--primary);">Group Overview</h4>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
