@@ -3216,14 +3216,14 @@ function initializeApp() {
                 );
 
                 if (incomingRequest) {
-                    // Accept the existing incoming request
-                    const { error: updateError } = await supabase
+                    // Accept the existing incoming request - delete the request row
+                    const { error: deleteError } = await supabase
                         .from('friend_requests')
-                        .update({ status: 'accepted' })
+                        .delete()
                         .eq('id', incomingRequest.id);
                     
-                    if (updateError) {
-                        console.error('Error accepting existing friend request:', updateError);
+                    if (deleteError) {
+                        console.error('Error deleting existing friend request:', deleteError);
                         showStatus('Could not accept existing friend request. Please try again.', 'error');
                         return;
                     }
@@ -3463,16 +3463,16 @@ function initializeApp() {
                         setTimeout(() => requestCard.remove(), 300);
                     }
                     
-                    // Update request status - ensure user is receiver
-                    const { error: updateError } = await supabase
+                    // Delete the request row now that it's accepted
+                    const { error: deleteError } = await supabase
                         .from('friend_requests')
-                        .update({ status: 'accepted' })
+                        .delete()
                         .eq('id', requestId)
                         .eq('receiver_id', user.id);
                     
-                    if (updateError) {
-                        console.error('Error updating friend request:', updateError);
-                        throw updateError;
+                    if (deleteError) {
+                        console.error('Error deleting friend request after accept:', deleteError);
+                        throw deleteError;
                     }
                     
                     // Create friendship - ensure no duplicate
@@ -3527,16 +3527,16 @@ function initializeApp() {
                         setTimeout(() => requestCard.remove(), 300);
                     }
                     
-                    // Update request status - ensure user is receiver
-                    const { error } = await supabase
+                    // Delete the request row when rejected
+                    const { error: rejectDeleteError } = await supabase
                         .from('friend_requests')
-                        .update({ status: 'rejected' })
+                        .delete()
                         .eq('id', requestId)
                         .eq('receiver_id', user.id);
                     
-                    if (error) {
-                        console.error('Error rejecting friend request:', error);
-                        throw error;
+                    if (rejectDeleteError) {
+                        console.error('Error deleting friend request after reject:', rejectDeleteError);
+                        throw rejectDeleteError;
                     }
                     showStatus('Friend request rejected', 'success');
                 }
