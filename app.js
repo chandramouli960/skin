@@ -1384,7 +1384,8 @@ function initializeApp() {
             const { error } = await supabase
                 .from('goals')
                 .insert([{
-                    // user_id is now set automatically in the database trigger
+                    // Explicitly set user_id; RLS now only checks auth.role() so this will pass
+                    user_id: user.id,
                     group_id: groupId,
                     title: title,
                     description: description,
