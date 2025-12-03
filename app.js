@@ -1384,7 +1384,7 @@ function initializeApp() {
             const { error } = await supabase
                 .from('goals')
                 .insert([{
-                    user_id: user.id,
+                    // user_id is now set automatically in the database trigger
                     group_id: groupId,
                     title: title,
                     description: description,
