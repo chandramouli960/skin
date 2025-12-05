@@ -558,6 +558,15 @@ function initializeApp() {
         const errorMessage = error.message || error.toString();
         if (!errorMessage) return 'An error occurred. Please try again.';
         
+        // Check for CORS errors first
+        const lowerMessage = errorMessage.toLowerCase();
+        if (lowerMessage.includes('cors') || 
+            lowerMessage.includes('access-control-allow-origin') ||
+            lowerMessage.includes('failed to fetch') ||
+            (error.name && error.name.includes('FetchError'))) {
+            return 'CORS Error: Your GitHub Pages domain needs to be added to Supabase allowed origins. Please configure it in your Supabase dashboard under Authentication > URL Configuration. See CORS_FIX_GUIDE.md for instructions.';
+        }
+        
         const errorMessages = {
             'User already registered': 'This email is already registered. Please log in instead.',
             'already registered': 'This email is already registered. Please log in instead.',
@@ -584,7 +593,6 @@ function initializeApp() {
             'unique constraint': 'This value already exists. Please use a different value.'
         };
         
-        const lowerMessage = errorMessage.toLowerCase();
         for (const [key, value] of Object.entries(errorMessages)) {
             if (lowerMessage.includes(key.toLowerCase())) {
                 return value;
